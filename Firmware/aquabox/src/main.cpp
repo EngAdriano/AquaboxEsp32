@@ -3,7 +3,7 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include "SPIFFS.h"
-
+#include "Sensores.hpp"
 
 // Crie o objeto AsyncWebServer na porta 80
 AsyncWebServer server(80);
@@ -13,6 +13,7 @@ const char* PARAM_INPUT_1 = "ssid";
 const char* PARAM_INPUT_2 = "pass";
 const char* PARAM_INPUT_3 = "ip";
 const char* PARAM_INPUT_4 = "gateway";
+
 
 //Variáveis para salvar valores do formulário HTML
 String ssid;
@@ -51,7 +52,8 @@ void writeFile(fs::FS &fs, const char * path, const char * message);
 bool initWiFi();
 String processor(const String& var);
 
-void setup() {
+void setup() 
+{
   // Porta serial para fins de depuração
   Serial.begin(115200);
 
@@ -155,9 +157,13 @@ void setup() {
     });
     server.begin();
   }
+
+  xTaskCreate(taskSensores, "Sensores", 2048, NULL, 1, NULL);
+
 }
 
-void loop() {
+void loop() 
+{
   
 }
 
