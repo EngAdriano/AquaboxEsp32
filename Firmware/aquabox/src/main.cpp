@@ -158,7 +158,8 @@ void setup()
     server.begin();
   }
 
-  xTaskCreate(taskSensores, "Sensores", 2048, NULL, 1, NULL);
+  //Task de monitoramento e leitura dos sensores de nível
+  xTaskCreate(taskSensores, "Sensores", 1024, NULL, 1, NULL);   
 
 }
 

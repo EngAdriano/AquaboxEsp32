@@ -7,6 +7,8 @@ void taskSensores (void *params)
 {
     nivelBaixo.setPressionadoCallback(&nivelBaixoPressionado);
     nivelAlto.setPressionadoCallback(&nivelAltoPressionado);
+    nivelBaixo.setLiberadoCallback(&nivelBaixoLiberado);
+    nivelAlto.setLiberadoCallback(&nivelAltoLiberado);
 
     while(true)
     {
@@ -28,4 +30,14 @@ void nivelBaixoPressionado()
 void nivelAltoPressionado()
 {
     Serial.println("Pressionou o sensor de nivel ALTO");
+}
+
+void nivelBaixoLiberado()
+{
+    Serial.println("Liberado o sensor de nivel BAIXO");
+}
+
+void nivelAltoLiberado()
+{
+    Serial.println("Liberado o sensor de nivel ALTO");
 }
