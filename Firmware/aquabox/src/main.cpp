@@ -3,10 +3,12 @@
 #include "WiFiManager.h"
 #include "EventoSensores.hpp"
 #include "Relogio.hpp"
-#include "Reles.hpp"
+#include "ModuloRele.hpp"
 
 //Protótipo das funções e tasks
 void taskSensores (void *params);
+void taskReles(void *params);
+void taskRelogio( void *params);
 void nivelBaixoPressionado();
 void nivelAltoPressionado();
 void nivelBaixoLiberado();
@@ -14,16 +16,14 @@ void nivelAltoLiberado();
 
 void setup() 
 {
+  /* Inicializa serial (baudrate 115200) */
   Serial.begin(115200);
 
+  /*Executa a conexão com WiFi via WiFiManager*/
   WiFi.mode(WIFI_STA);
-
   WiFiManager wm;
-
   bool res;
-
   res = wm.autoConnect("Aquabox");
-
   if(!res)
   {
     Serial.println("Falha ao conectar");
@@ -49,12 +49,11 @@ void loop()
 }
 
 /* --------------------------------------------------*/
-/* ---------------------- Tarefas -------------------*/
+/* --------------- Tarefas / Funções ----------------*/
 /* --------------------------------------------------*/
 
 void taskSensores (void *params)
 {
-
   #define SENSOR_NIVEL_BAIXO 27
   #define SENSOR_NIVEL_ALTO 14
   //const int SENSOR_NIVEL_BAIXO = 27;
@@ -75,8 +74,6 @@ void taskSensores (void *params)
 
       /* Espera um segundo */
       vTaskDelay( 100 / portTICK_PERIOD_MS ); 
-
-
   }
 }
 
@@ -100,4 +97,34 @@ void nivelAltoLiberado()
     Serial.println("Liberado o sensor de nivel ALTO");
 }
 
+void taskReles(void *params)
+{
+    ModuloRele Reles(2, 15, 5, 4, false);
 
+    while(true)
+    {
+        for (int i = 0; i < N_RELES; i++)
+        {
+            Reles.toggle(i);
+            vTaskDelay( 500 / portTICK_PERIOD_MS ); 
+
+        }
+    }
+}
+
+void taskRelogio( void *params)
+{
+    const char* ntpServer = "pool.ntp.org";
+    const long  gmtOffset_sec = -14400; //GMT Time Brazil
+    const int   daylightOffset_sec = 3600;
+
+    // Init and get the time
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    printLocalTime();
+
+    while(true)
+    {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        printLocalTime();
+    }
+}

@@ -6,6 +6,5 @@
 
 //protótipo das funções
 void printLocalTime(void);
-void taskRelogio( void *params);
 
 #endif //RELOGIO_H

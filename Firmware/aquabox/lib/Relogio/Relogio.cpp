@@ -1,27 +1,5 @@
 #include "Relogio.hpp"
 
-void wifiInit(void)
-{
-
-}
-
-void taskRelogio( void *params)
-{
-    const char* ntpServer = "pool.ntp.org";
-    const long  gmtOffset_sec = -14400; //GMT Time Brazil
-    const int   daylightOffset_sec = 3600;
-
-    // Init and get the time
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-    printLocalTime();
-
-    while(true)
-    {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        printLocalTime();
-    }
-}
-
 void printLocalTime(void)
 {
   struct tm timeinfo;
