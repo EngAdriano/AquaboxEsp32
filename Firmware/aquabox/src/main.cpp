@@ -6,22 +6,25 @@
 #include "ModuloRele.hpp"
 
 /* Pinos*/
-#define BOMBA 36
-#define MANUTENCAO 39
-#define SENSOR_NIVEL_BAIXO 27
-#define SENSOR_NIVEL_ALTO 14
+#define BOMBA               36
+#define MANUTENCAO          39
+#define SENSOR_NIVEL_BAIXO  27
+#define SENSOR_NIVEL_ALTO   14
+#define RELE_BOMBA          2
+#define RELE_CAIXA          15
+#define RELE_SETOR_1        5
+#define RELE_SETOR_2        4
 
 /* Comandos*/
-#define DESLIGA_RELES   100
-#define DESLIGA_BOMBA   110
-#define LIGA_BOMBA      111
-#define DESLIGA_CAIXA   120
-#define LIGA_CAIXA      121
-#define DESLIGA_SETOR1  130
-#define LIGA_SETOR1     131
-#define DESLIGA_SETOR2  140
-#define LIGA_SETOR2     141
-
+#define DESLIGA_RELES   100         //Desliga todos os relés
+#define DESLIGA_BOMBA   110         //Desliga o motor da bomba d'água
+#define LIGA_BOMBA      111         //Liga o motor da bomba d'água
+#define DESLIGA_CAIXA   120         //Desliga o enchimento da caixa d'água
+#define LIGA_CAIXA      121         //Liga o enchimento da caixa d'água
+#define DESLIGA_SETOR1  130         //desliga a inrrigação do setor 1
+#define LIGA_SETOR1     131         //Liga a inrrigação do setor 1
+#define DESLIGA_SETOR2  140         //desliga a inrrigação do setor 2
+#define LIGA_SETOR2     141         //Liga a inrrigação do setor 2
 
 //Protótipo das funções e tasks
 void taskSensores (void *params);
@@ -31,8 +34,6 @@ void nivelBaixoPressionado();
 void nivelAltoPressionado();
 void nivelBaixoLiberado();
 void nivelAltoLiberado();
-
-
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Comandos;
@@ -157,9 +158,9 @@ void nivelAltoLiberado()
 
 void taskReles(void *params)
 {
-    
-    const int RELAYS[N_RELES] = {2, 15, 5, 4};
+    const int RELAYS[N_RELES] = {RELE_BOMBA, RELE_CAIXA, RELE_SETOR_1, RELE_SETOR_2};
     ModuloRele Reles(RELAYS[0], RELAYS[1], RELAYS[2], RELAYS[3], true);
+    Reles.offAll();
 
     int static receive = 0;
 
