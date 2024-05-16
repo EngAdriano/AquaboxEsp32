@@ -27,7 +27,8 @@
 #define LIGA_SETOR2     141         //Liga a inrrigação do setor 2
 
 //Protótipo das funções e tasks
-void taskSensores (void *params);
+void taskControle(void *params);
+void taskSensores(void *params);
 void taskReles(void *params);
 void taskRelogio( void *params);
 void nivelBaixoPressionado();
@@ -82,7 +83,12 @@ void loop()
 /* --------------- Tarefas / Funções ----------------*/
 /* --------------------------------------------------*/
 
-void taskSensores (void *params)
+void taskControle(void *params)
+{
+    int result = 0;
+}
+
+void taskSensores(void *params)
 {
     /* Estânciar objetos*/
     EventoSensores nivelBaixo(SENSOR_NIVEL_BAIXO, LOW);
@@ -168,22 +174,22 @@ void taskReles(void *params)
     {
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Reles, (void *)&receive, portMAX_DELAY);
-        Serial.println("Dado recebido: ");
-        Serial.println(receive);
 
         switch (receive)
         {
         case 100:               //Desliga todos os relés
             Reles.offAll();
-            Serial.println("Relés Desligados");
+            receive = 0;
             break;
 
         case 110:               //desliga somente a bomba               
             Reles.off(0);
+            receive = 0;
             break;
 
         case 111:               //Liga somente a bomba                
             Reles.on(0);
+            receive = 0;
             break;
 
         case 120:               //desliga o encher da caixa d'água                                            
@@ -194,36 +200,38 @@ void taskReles(void *params)
             break;
 
         case 121:               //liga o encher da caixa d'água                               
-            Serial.println("Executando switch");
             Reles.on(1);
             vTaskDelay( 3000 / portTICK_PERIOD_MS );
             Reles.on(0);
             receive = 0;
-            Serial.println("Estou depois");
             break;
 
         case 130:               //desliga a irrigação do setor 1                              
             Reles.off(0);
             vTaskDelay( 2000 / portTICK_PERIOD_MS ); 
             Reles.off(2);
+            receive = 0;
             break;
 
         case 131:               //liga a irrigação do setor 1
             Reles.on(2);
             vTaskDelay( 2000 / portTICK_PERIOD_MS );
             Reles.on(0);
+            receive = 0;
             break;
 
         case 140:               //desliga a irrigação do setor 2
             Reles.off(0);
             vTaskDelay( 2000 / portTICK_PERIOD_MS ); 
             Reles.off(3);
+            receive = 0;
             break;
 
         case 141:               //liga a irrigação do setor 2
             Reles.on(3);
             vTaskDelay( 2000 / portTICK_PERIOD_MS );
             Reles.on(0);
+            receive = 0;
             break;
         
         default:
@@ -240,11 +248,25 @@ void taskRelogio( void *params)
 
     // Init and get the time
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-    printLocalTime();
+    struct tm timeinfo;
+
+    Serial.print(timeinfo.tm_hour);
+    Serial.print(":");
+    Serial.print(timeinfo.tm_min);
+    Serial.print(":");
+    Serial.println(timeinfo.tm_sec);
 
     while(true)
     {
+        if(!getLocalTime(&timeinfo))
+        {
+            Serial.println("Falha ao obter o relógio");
+        }
+        else
+        {
+            
+        }
+
         vTaskDelay(1000 / portTICK_PERIOD_MS);
-        printLocalTime();
     }
 }
