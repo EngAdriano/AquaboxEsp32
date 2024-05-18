@@ -93,13 +93,13 @@ void loop()
 void taskControle(void *params)
 {
     /*Regra de negócio ficam aqui, centro de comando*/
-    /* Espera até algo ser recebido na queue */
     int receive = 0;
     int result = 0;
     bool erro = true;
 
     while(true)
     {
+        /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Controle, (void *)&receive, portMAX_DELAY);
 
         Serial.print("Comando no controle: ");
