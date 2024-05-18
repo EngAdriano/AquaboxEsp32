@@ -311,6 +311,17 @@ void taskReles(void *params)
 
 void taskRelogio( void *params)
 {
+   /* Estrutura de dados da struct tm                       */
+   /*tm_sec;           segundo, faixa 0 to 59               */
+   /*tm_min;           minutos, faixa 0 a 59                */
+   /*tm_hora;          horas, intervalo de 0 a 23           */
+   /*tm_mdia;          dia do mês, faixa 1 to 31            */
+   /*tm_mon;           mês, intervalo de 0 a 11             */
+   /*tm_ano;           O número de anos desde 1900          */
+   /*tm_wday;          dia da semana, intervalo de 0 a 6    */
+   /*tm_yday;          dia do ano, intervalo de 0 a 365     */
+   /*tm_isdst;         horário de verão                     */
+
     /* Estrutura para dias e horários para irrigação*/
     struct horarioDeIrrigacao
     {
