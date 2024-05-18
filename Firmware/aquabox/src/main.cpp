@@ -31,13 +31,16 @@ void taskControle(void *params);
 void taskSensores(void *params);
 void taskReles(void *params);
 void taskRelogio( void *params);
+void btnBombaPressionado();
+void btnBombaLiberado();
 void nivelBaixoPressionado();
 void nivelAltoPressionado();
 void nivelBaixoLiberado();
 void nivelAltoLiberado();
+bool dadoNaFila(int result);
 
 /* filas (queues) */
-QueueHandle_t xQueue_Reles, xQueue_Comandos;
+QueueHandle_t xQueue_Reles, xQueue_Controle;
 
 /* semaforos utilizados */
 
@@ -63,6 +66,7 @@ void setup()
     //Criação da fila (Queue)
     ////Ao inicializar a fila devemos passar o tamanho dela e o tipo de dado. Pode ser inclusive estruturas
     xQueue_Reles = xQueueCreate(4, sizeof(int));
+    xQueue_Controle = xQueueCreate(4, sizeof(int));
 
     //Task de monitoramento e leitura dos sensores de nível
     xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 3, NULL);
@@ -72,6 +76,9 @@ void setup()
 
     //Task de acionamento dos relés
     xTaskCreate(taskReles, "Reles", 1024, NULL, 1,NULL);
+
+    //Task de controle
+    xTaskCreate(taskControle, "Controle", 2048, NULL, 2, NULL);
 }
 
 void loop() 
@@ -85,7 +92,31 @@ void loop()
 
 void taskControle(void *params)
 {
+    /*Regra de negócio ficam aqui, centro de comando*/
+    /* Espera até algo ser recebido na queue */
+    int receive = 0;
     int result = 0;
+    bool erro = true;
+
+    while(true)
+    {
+        xQueueReceive(xQueue_Controle, (void *)&receive, portMAX_DELAY);
+
+        Serial.print("Comando no controle: ");
+        Serial.println (receive);
+
+        if (receive > 99 & receive < 199)
+        {
+            Serial.println("Enviando dados para relés");
+            result = xQueueSend(xQueue_Reles, &receive, 500 / portTICK_PERIOD_MS);
+            erro = dadoNaFila(result);
+            if(!erro)
+            {
+                Serial.println("Erro ao colocar dado na fila");
+                erro = true;
+            }
+        }
+    }
 }
 
 void taskSensores(void *params)
@@ -93,87 +124,125 @@ void taskSensores(void *params)
     /* Estânciar objetos*/
     EventoSensores nivelBaixo(SENSOR_NIVEL_BAIXO, LOW);
     EventoSensores nivelAlto(SENSOR_NIVEL_ALTO, LOW);
+    EventoSensores btnBomba(BOMBA, LOW);
+    EventoSensores btnManutencao(MANUTENCAO, LOW);
 
     nivelBaixo.setPressionadoCallback(&nivelBaixoPressionado);
     nivelAlto.setPressionadoCallback(&nivelAltoPressionado);
     nivelBaixo.setLiberadoCallback(&nivelBaixoLiberado);
     nivelAlto.setLiberadoCallback(&nivelAltoLiberado);
+    btnBomba.setPressionadoCallback(&btnBombaPressionado);
+    btnBomba.setLiberadoCallback(&btnBombaLiberado);
 
     while(true)
     {
         nivelBaixo.process();
         nivelAlto.process();
+        btnBomba.process();
 
         /* Espera um segundo */
         vTaskDelay( 100 / portTICK_PERIOD_MS ); 
     }
 }
 
+void btnBombaPressionado()
+{
+    int result = 0;
+    int comando = LIGA_BOMBA;
+    bool erro = true;
+
+    Serial.println("Botão da Bomba pressionado");
+
+    result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+    erro = dadoNaFila(result);
+    if(!erro)
+    {
+        Serial.println("Erro ao colocar dado na fila");
+        erro = true;
+    }
+}
+
+void btnBombaLiberado()
+{
+    int result = 0;
+    int comando = DESLIGA_BOMBA;
+    bool erro = true;
+
+    result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+    erro = dadoNaFila(result);
+    if(!erro)
+    {
+        Serial.println("Erro ao colocar dado na fila");
+        erro = true;
+    }
+}
+
 void nivelBaixoPressionado()
 {
-    
     int result = 0;
-    Serial.println("Pressionou o sensor de nivel BAIXO");
-    
     int comando = LIGA_CAIXA;
+    bool erro = true;
 
-    result = xQueueSend(xQueue_Reles, &comando, 500 / portTICK_PERIOD_MS);
-
-    if(result)      //Checar o retorno para verificar se o dado foi inserido na fila com sucesso
-        {
-            printf("Dado inserido na fila com sucesso \n");
-        }
-        else
-        {
-            printf("Erro ao inserir dado na fila \n");
-        }
-    /* Espera um segundo */
-        vTaskDelay( 1000 / portTICK_PERIOD_MS ); 
+    result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+    erro = dadoNaFila(result);
+    if(!erro)
+    {
+        Serial.println("Erro ao colocar dado na fila");
+        erro = true;
+    }
 }
 
 void nivelAltoPressionado()
 {
     int result = 0;
-    Serial.println("Pressionou o sensor de nivel ALTO");
-    
     int comando = DESLIGA_CAIXA;
+    bool erro = true;
 
     result = xQueueSend(xQueue_Reles, &comando, 500 / portTICK_PERIOD_MS);
-
-    if(result)      //Checar o retorno para verificar se o dado foi inserido na fila com sucesso
-        {
-            printf("Dado inserido na fila com sucesso \n");
-        }
-        else
-        {
-            printf("Erro ao inserir dado na fila \n");
-        }
-    /* Espera um segundo */
-        vTaskDelay( 1000 / portTICK_PERIOD_MS ); 
+    erro = dadoNaFila(result);
+    if(!erro)
+    {
+        Serial.println("Erro ao colocar dado na fila");
+        erro = true;
+    }
 }
 
 void nivelBaixoLiberado()
 {
-    Serial.println("Liberado o sensor de nivel BAIXO");
+    //Tratar depois para detectar erro no sensor
 }
 
 void nivelAltoLiberado()
 {
-    Serial.println("Liberado o sensor de nivel ALTO");
+    //Tratar depois para detectar erro no sensor
+}
+
+bool dadoNaFila(int result)
+{
+    if(result)      //Checar o retorno para verificar se o dado foi inserido na fila com sucesso
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 void taskReles(void *params)
 {
+    int receive = 0;
+
     const int RELAYS[N_RELES] = {RELE_BOMBA, RELE_CAIXA, RELE_SETOR_1, RELE_SETOR_2};
     ModuloRele Reles(RELAYS[0], RELAYS[1], RELAYS[2], RELAYS[3], true);
     Reles.offAll();
-
-    int static receive = 0;
 
     while(true)
     {
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Reles, (void *)&receive, portMAX_DELAY);
+        Serial.print("Comando nos relés: ");
+        Serial.println (receive);
 
         switch (receive)
         {
@@ -242,19 +311,39 @@ void taskReles(void *params)
 
 void taskRelogio( void *params)
 {
+    /* Estrutura para dias e horários para irrigação*/
+    struct horarioDeIrrigacao
+    {
+        int horaDeInicio;
+        int minutoDeInicio;
+        int tempoDeDuracao;
+    };
+
+    /* Vetor dos dias da semana*/
+    bool dias[7] = {true, true, true, true, true, true, true};
+
+    struct horarioDeIrrigacao horarioSetor1;
+    struct horarioDeIrrigacao horarioSetor2;
+    
+    /* Configuração Setor 1*/
+    horarioSetor1.horaDeInicio = 17;
+    horarioSetor1.minutoDeInicio = 00;
+    horarioSetor1.tempoDeDuracao = 20;
+
+    /* Configuração Setor */
+    horarioSetor2.horaDeInicio = 17;
+    horarioSetor2.minutoDeInicio = 30;
+    horarioSetor2.tempoDeDuracao = 20;
+
+    /* Variáveis para o relógio*/
     const char* ntpServer = "pool.ntp.org";
     const long  gmtOffset_sec = -14400; //GMT Time Brazil
     const int   daylightOffset_sec = 3600;
+    int diaDaSemana = 0;
 
     // Init and get the time
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     struct tm timeinfo;
-
-    Serial.print(timeinfo.tm_hour);
-    Serial.print(":");
-    Serial.print(timeinfo.tm_min);
-    Serial.print(":");
-    Serial.println(timeinfo.tm_sec);
 
     while(true)
     {
@@ -264,9 +353,26 @@ void taskRelogio( void *params)
         }
         else
         {
-            
+            diaDaSemana = timeinfo.tm_wday;
+
+            if(dias[diaDaSemana] == true)
+            {
+                //Serial.println("Tem que ligar a Irrigação");
+                //Serial.println(diaDaSemana);
+
+                if((horarioSetor1.horaDeInicio = timeinfo.tm_hour) & (horarioSetor1.minutoDeInicio = timeinfo.tm_min))
+                {
+                    
+                }
+            }
+            else
+            {
+                Serial.println("Não precisa ligar");
+            }
         }
 
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
+
+
