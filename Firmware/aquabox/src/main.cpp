@@ -16,15 +16,25 @@
 #define RELE_SETOR_2        4
 
 /* Comandos*/
-#define DESLIGA_RELES   100         //Desliga todos os relés
-#define DESLIGA_BOMBA   110         //Desliga o motor da bomba d'água
-#define LIGA_BOMBA      111         //Liga o motor da bomba d'água
-#define DESLIGA_CAIXA   120         //Desliga o enchimento da caixa d'água
-#define LIGA_CAIXA      121         //Liga o enchimento da caixa d'água
-#define DESLIGA_SETOR1  130         //desliga a inrrigação do setor 1
-#define LIGA_SETOR1     131         //Liga a inrrigação do setor 1
-#define DESLIGA_SETOR2  140         //desliga a inrrigação do setor 2
-#define LIGA_SETOR2     141         //Liga a inrrigação do setor 2
+#define DESLIGA_RELES       100         //Desliga todos os relés  
+#define DESLIGA_BOMBA       110         //Desliga o motor da bomba d'água
+#define LIGA_BOMBA          111         //Liga o motor da bomba d'água
+#define DESLIGA_CAIXA       120         //Desliga o enchimento da caixa d'água
+#define LIGA_CAIXA          121         //Liga o enchimento da caixa d'água
+#define DESLIGA_SETOR1      130         //desliga a inrrigação do setor 1
+#define LIGA_SETOR1         131         //Liga a inrrigação do setor 1
+#define DESLIGA_SETOR2      140         //desliga a inrrigação do setor 2
+#define LIGA_SETOR2         141         //Liga a inrrigação do setor 2
+#define DESLIGA_MANUTENCAO  200         //Desliga manutenção
+#define LIGA_MANUTENCAO     201         //Liga manutenção
+#define SETOR1_LIGA         10          //Liga alguma função - Setor 1
+#define SETOR1_DESLIGA      11          //Desliga alguma função - Setor 1
+#define SETOR2_LIGA         20          //Liga alguma função - Setor 2
+#define SETOR2_DESLIGA      21          //Desliga alguma função - Setor 2
+#define TEMPO_INTERVALO     5           //Tempo de intervalo para iniciar o segundo setor
+
+/* Variáveis globais */
+bool flagManutencao = true;
 
 //Protótipo das funções e tasks
 void taskControle(void *params);
@@ -105,7 +115,17 @@ void taskControle(void *params)
         Serial.print("Comando no controle: ");
         Serial.println (receive);
 
-        if (receive > 99 & receive < 199)
+        if (receive == DESLIGA_MANUTENCAO)
+        {
+            flagManutencao = false;
+        }
+
+        if (receive == LIGA_MANUTENCAO)
+        {
+            flagManutencao = true;
+        }
+
+        if (receive >= DESLIGA_RELES & receive <= LIGA_SETOR2 & flagManutencao == true)
         {
             Serial.println("Enviando dados para relés");
             result = xQueueSend(xQueue_Reles, &receive, 500 / portTICK_PERIOD_MS);
@@ -142,6 +162,38 @@ void taskSensores(void *params)
 
         /* Espera um segundo */
         vTaskDelay( 100 / portTICK_PERIOD_MS ); 
+    }
+}
+
+void btnManutencaoPressionado()
+{
+    int result = 0;
+    int comando = LIGA_MANUTENCAO;
+    bool erro = true;
+
+    Serial.println("Botão da Bomba pressionado");
+
+    result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+    erro = dadoNaFila(result);
+    if(!erro)
+    {
+        Serial.println("Erro ao colocar dado na fila");
+        erro = true;
+    }
+}
+
+void btnManutencaoliberado()
+{
+    int result = 0;
+    int comando = DESLIGA_MANUTENCAO;
+    bool erro = true;
+
+    result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+    erro = dadoNaFila(result);
+    if(!erro)
+    {
+        Serial.println("Erro ao colocar dado na fila");
+        erro = true;
     }
 }
 
@@ -277,28 +329,28 @@ void taskReles(void *params)
 
         case 130:               //desliga a irrigação do setor 1                              
             Reles.off(0);
-            vTaskDelay( 2000 / portTICK_PERIOD_MS ); 
+            vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
             Reles.off(2);
             receive = 0;
             break;
 
         case 131:               //liga a irrigação do setor 1
             Reles.on(2);
-            vTaskDelay( 2000 / portTICK_PERIOD_MS );
+            vTaskDelay( 3000 / portTICK_PERIOD_MS );
             Reles.on(0);
             receive = 0;
             break;
 
         case 140:               //desliga a irrigação do setor 2
             Reles.off(0);
-            vTaskDelay( 2000 / portTICK_PERIOD_MS ); 
+            vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
             Reles.off(3);
             receive = 0;
             break;
 
         case 141:               //liga a irrigação do setor 2
             Reles.on(3);
-            vTaskDelay( 2000 / portTICK_PERIOD_MS );
+            vTaskDelay( 3000 / portTICK_PERIOD_MS );
             Reles.on(0);
             receive = 0;
             break;
@@ -322,6 +374,17 @@ void taskRelogio( void *params)
    /*tm_yday;          dia do ano, intervalo de 0 a 365     */
    /*tm_isdst;         horário de verão                     */
 
+    int result = 0;
+    int comando = 0;
+    bool erro = true;
+    int setorComando = 0;
+    int tempoDecorrido = 0;
+    bool iniciarContagem = false;
+    byte enviaLigaSetor1 = 1;
+    byte enviaDesligaSetor1 = 0;
+    byte enviaLigaSetor2 = 0;
+    byte enviaDesligaSetor2 = 0;
+
     /* Estrutura para dias e horários para irrigação*/
     struct horarioDeIrrigacao
     {
@@ -334,17 +397,11 @@ void taskRelogio( void *params)
     bool dias[7] = {true, true, true, true, true, true, true};
 
     struct horarioDeIrrigacao horarioSetor1;
-    struct horarioDeIrrigacao horarioSetor2;
     
-    /* Configuração Setor 1*/
-    horarioSetor1.horaDeInicio = 17;
-    horarioSetor1.minutoDeInicio = 00;
-    horarioSetor1.tempoDeDuracao = 20;
-
-    /* Configuração Setor */
-    horarioSetor2.horaDeInicio = 17;
-    horarioSetor2.minutoDeInicio = 30;
-    horarioSetor2.tempoDeDuracao = 20;
+    /* Configuração tempo dos Setores */
+    horarioSetor1.horaDeInicio = 19;
+    horarioSetor1.minutoDeInicio = 10;
+    horarioSetor1.tempoDeDuracao = 60;
 
     /* Variáveis para o relógio*/
     const char* ntpServer = "pool.ntp.org";
@@ -366,14 +423,42 @@ void taskRelogio( void *params)
         {
             diaDaSemana = timeinfo.tm_wday;
 
+            if(iniciarContagem == true)
+            {
+                tempoDecorrido++;
+
+                Serial.print("Tempo decorrido: ");
+                Serial.println(tempoDecorrido);
+            }
+            
             if(dias[diaDaSemana] == true)
             {
-                //Serial.println("Tem que ligar a Irrigação");
-                //Serial.println(diaDaSemana);
-
-                if((horarioSetor1.horaDeInicio = timeinfo.tm_hour) & (horarioSetor1.minutoDeInicio = timeinfo.tm_min))
+                if((horarioSetor1.horaDeInicio == timeinfo.tm_hour) & (horarioSetor1.minutoDeInicio == timeinfo.tm_min) & (enviaLigaSetor1 == 1))
                 {
+                    setorComando = SETOR1_LIGA;
+                    iniciarContagem = true;
+                    tempoDecorrido = 0;
+                }
+                
+                if ((tempoDecorrido >= horarioSetor1.tempoDeDuracao) & (enviaDesligaSetor1 == 1))
+                {
+                    setorComando = SETOR1_DESLIGA;
+                    iniciarContagem = false;
+                }
+
+                if((tempoDecorrido >= horarioSetor1.tempoDeDuracao) & (enviaLigaSetor2 == 1))
+                {
+                    vTaskDelay(5000 / portTICK_PERIOD_MS);     //5 segundos
+                    setorComando = SETOR2_LIGA;
+                    iniciarContagem = true;
+                    tempoDecorrido = 0;
                     
+                }
+                if((tempoDecorrido >= horarioSetor1.tempoDeDuracao) & (enviaDesligaSetor2 == 1))
+                {
+                    setorComando = SETOR2_DESLIGA;
+                    iniciarContagem = false;
+                    tempoDecorrido = 0;
                 }
             }
             else
@@ -382,8 +467,86 @@ void taskRelogio( void *params)
             }
         }
 
+        switch (setorComando)
+        {
+        case SETOR1_LIGA:
+            comando = LIGA_SETOR1;
+
+            result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+            erro = dadoNaFila(result);
+            if(!erro)
+            {
+                Serial.println("Erro ao colocar dado na fila");
+                erro = true;
+            }
+            comando = 0;
+            setorComando = 0;
+            enviaLigaSetor1 = 0;
+            enviaDesligaSetor1 = 1;
+            break;
+
+        case SETOR1_DESLIGA:
+            comando = DESLIGA_SETOR1;
+
+            result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+            erro = dadoNaFila(result);
+            if(!erro)
+            {
+                Serial.println("Erro ao colocar dado na fila");
+                erro = true;
+            }
+            comando = 0;
+            setorComando = 0;
+            enviaDesligaSetor1 = 0;
+            enviaLigaSetor2 = 1;
+            break;
+
+        case SETOR2_LIGA:
+            comando = LIGA_SETOR2;
+
+            result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+            erro = dadoNaFila(result);
+            if(!erro)
+            {
+                Serial.println("Erro ao colocar dado na fila");
+                erro = true;
+            }
+            comando = 0;
+            setorComando = 0;
+            enviaLigaSetor2 = 0;
+            enviaDesligaSetor2 = 1;
+            break;
+
+        case SETOR2_DESLIGA:
+            comando = DESLIGA_SETOR2;
+
+            result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+            erro = dadoNaFila(result);
+            if(!erro)
+            {
+                Serial.println("Erro ao colocar dado na fila");
+                erro = true;
+            }
+            comando = 0;
+            setorComando = 0;
+            enviaDesligaSetor2 = 0;
+            enviaLigaSetor1 = 1;
+
+            //para teste, depois retirar
+            horarioSetor1.minutoDeInicio += 6;
+            if(horarioSetor1.minutoDeInicio > 59)
+                {
+                    horarioSetor1.minutoDeInicio = 0;
+                    horarioSetor1.horaDeInicio++; 
+                }
+            break;
+        
+        default:
+            comando = 0;
+            setorComando = 0;
+            break;
+        }
+
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
-
-
