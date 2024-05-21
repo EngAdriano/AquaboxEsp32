@@ -4,8 +4,12 @@
 #include "EventoSensores.hpp"
 #include "Relogio.hpp"
 #include "ModuloRele.hpp"
+#include "EEPROM.h"
 
-/* Pinos*/
+/* Libera prints para debug */
+#define DEBUG
+
+/* Pinos GPIOs */
 #define BOMBA               36
 #define MANUTENCAO          39
 #define SENSOR_NIVEL_BAIXO  27
@@ -15,7 +19,7 @@
 #define RELE_SETOR_1        5
 #define RELE_SETOR_2        4
 
-/* Comandos*/
+/* Comandos */
 #define DESLIGA_RELES       100         //Desliga todos os relés  
 #define DESLIGA_BOMBA       110         //Desliga o motor da bomba d'água
 #define LIGA_BOMBA          111         //Liga o motor da bomba d'água
@@ -36,11 +40,12 @@
 /* Variáveis globais */
 bool flagManutencao = true;
 
-//Protótipo das funções e tasks
+/* Protótipo das funções e tasks */
 void taskControle(void *params);
 void taskSensores(void *params);
 void taskReles(void *params);
-void taskRelogio( void *params);
+void taskRelogio(void *params);
+void taskConfiguracao(void *params);
 void btnBombaPressionado();
 void btnBombaLiberado();
 void nivelBaixoPressionado();
@@ -48,6 +53,7 @@ void nivelAltoPressionado();
 void nivelBaixoLiberado();
 void nivelAltoLiberado();
 bool dadoNaFila(int result);
+void erroFila();
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Controle;
@@ -66,11 +72,15 @@ void setup()
     res = wm.autoConnect("Aquabox");
     if(!res)
     {
-        Serial.println("Falha ao conectar");
+        #ifdef DEBUG
+            Serial.println("Falha ao conectar");
+        #endif
     }
     else
     {
-        Serial.println("Conectado...");
+        #ifdef DEBUG
+            Serial.println("Conectado...");
+        #endif
     }
     
     //Criação da fila (Queue)
@@ -112,8 +122,10 @@ void taskControle(void *params)
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Controle, (void *)&receive, portMAX_DELAY);
 
-        Serial.print("Comando no controle: ");
-        Serial.println (receive);
+        #ifdef DEBUG
+            Serial.print("Comando chegou no controle: ");
+            Serial.println (receive);
+        #endif
 
         if (receive == DESLIGA_MANUTENCAO)
         {
@@ -127,12 +139,11 @@ void taskControle(void *params)
 
         if (receive >= DESLIGA_RELES & receive <= LIGA_SETOR2 & flagManutencao == true)
         {
-            Serial.println("Enviando dados para relés");
             result = xQueueSend(xQueue_Reles, &receive, 500 / portTICK_PERIOD_MS);
             erro = dadoNaFila(result);
             if(!erro)
             {
-                Serial.println("Erro ao colocar dado na fila");
+                erroFila();
                 erro = true;
             }
         }
@@ -171,13 +182,15 @@ void btnManutencaoPressionado()
     int comando = LIGA_MANUTENCAO;
     bool erro = true;
 
-    Serial.println("Botão da Bomba pressionado");
+    #ifdef DEBUG
+        Serial.println("Botão da Manutenção pressionado");
+    #endif
 
     result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
     erro = dadoNaFila(result);
     if(!erro)
     {
-        Serial.println("Erro ao colocar dado na fila");
+        erroFila();
         erro = true;
     }
 }
@@ -192,7 +205,7 @@ void btnManutencaoliberado()
     erro = dadoNaFila(result);
     if(!erro)
     {
-        Serial.println("Erro ao colocar dado na fila");
+        erroFila();
         erro = true;
     }
 }
@@ -203,13 +216,15 @@ void btnBombaPressionado()
     int comando = LIGA_BOMBA;
     bool erro = true;
 
-    Serial.println("Botão da Bomba pressionado");
+    #ifdef DEBUG
+        Serial.println("Botão da Bomba pressionado");
+    #endif
 
     result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
     erro = dadoNaFila(result);
     if(!erro)
     {
-        Serial.println("Erro ao colocar dado na fila");
+        erroFila();
         erro = true;
     }
 }
@@ -224,7 +239,7 @@ void btnBombaLiberado()
     erro = dadoNaFila(result);
     if(!erro)
     {
-        Serial.println("Erro ao colocar dado na fila");
+        erroFila();
         erro = true;
     }
 }
@@ -239,7 +254,7 @@ void nivelBaixoPressionado()
     erro = dadoNaFila(result);
     if(!erro)
     {
-        Serial.println("Erro ao colocar dado na fila");
+        erroFila();
         erro = true;
     }
 }
@@ -254,7 +269,7 @@ void nivelAltoPressionado()
     erro = dadoNaFila(result);
     if(!erro)
     {
-        Serial.println("Erro ao colocar dado na fila");
+        erroFila();
         erro = true;
     }
 }
@@ -293,8 +308,11 @@ void taskReles(void *params)
     {
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Reles, (void *)&receive, portMAX_DELAY);
-        Serial.print("Comando nos relés: ");
-        Serial.println (receive);
+
+        #ifdef DEBUG
+            Serial.print("Comando chegou nos relés: ");
+            Serial.println (receive);
+        #endif
 
         switch (receive)
         {
@@ -361,7 +379,7 @@ void taskReles(void *params)
     }
 }
 
-void taskRelogio( void *params)
+void taskRelogio(void *params)
 {
    /* Estrutura de dados da struct tm                       */
    /*tm_sec;           segundo, faixa 0 to 59               */
@@ -399,9 +417,9 @@ void taskRelogio( void *params)
     struct horarioDeIrrigacao horarioSetor1;
     
     /* Configuração tempo dos Setores */
-    horarioSetor1.horaDeInicio = 19;
-    horarioSetor1.minutoDeInicio = 10;
-    horarioSetor1.tempoDeDuracao = 60;
+    horarioSetor1.horaDeInicio = 12;
+    horarioSetor1.minutoDeInicio = 25;
+    horarioSetor1.tempoDeDuracao = 1200; //20 minutos
 
     /* Variáveis para o relógio*/
     const char* ntpServer = "pool.ntp.org";
@@ -417,7 +435,9 @@ void taskRelogio( void *params)
     {
         if(!getLocalTime(&timeinfo))
         {
-            Serial.println("Falha ao obter o relógio");
+            #ifdef DEBUG
+                Serial.println("Falha ao obter o relógio");
+            #endif
         }
         else
         {
@@ -426,9 +446,6 @@ void taskRelogio( void *params)
             if(iniciarContagem == true)
             {
                 tempoDecorrido++;
-
-                Serial.print("Tempo decorrido: ");
-                Serial.println(tempoDecorrido);
             }
             
             if(dias[diaDaSemana] == true)
@@ -463,7 +480,9 @@ void taskRelogio( void *params)
             }
             else
             {
-                Serial.println("Não precisa ligar");
+                #ifdef DEBUG
+                    Serial.println("Não precisa ligar");
+                #endif
             }
         }
 
@@ -476,7 +495,7 @@ void taskRelogio( void *params)
             erro = dadoNaFila(result);
             if(!erro)
             {
-                Serial.println("Erro ao colocar dado na fila");
+                erroFila();
                 erro = true;
             }
             comando = 0;
@@ -492,7 +511,7 @@ void taskRelogio( void *params)
             erro = dadoNaFila(result);
             if(!erro)
             {
-                Serial.println("Erro ao colocar dado na fila");
+                erroFila();
                 erro = true;
             }
             comando = 0;
@@ -508,7 +527,7 @@ void taskRelogio( void *params)
             erro = dadoNaFila(result);
             if(!erro)
             {
-                Serial.println("Erro ao colocar dado na fila");
+                erroFila();
                 erro = true;
             }
             comando = 0;
@@ -524,7 +543,7 @@ void taskRelogio( void *params)
             erro = dadoNaFila(result);
             if(!erro)
             {
-                Serial.println("Erro ao colocar dado na fila");
+                erroFila();
                 erro = true;
             }
             comando = 0;
@@ -533,12 +552,7 @@ void taskRelogio( void *params)
             enviaLigaSetor1 = 1;
 
             //para teste, depois retirar
-            horarioSetor1.minutoDeInicio += 6;
-            if(horarioSetor1.minutoDeInicio > 59)
-                {
-                    horarioSetor1.minutoDeInicio = 0;
-                    horarioSetor1.horaDeInicio++; 
-                }
+            horarioSetor1.horaDeInicio++;
             break;
         
         default:
@@ -549,4 +563,23 @@ void taskRelogio( void *params)
 
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
+}
+
+void taskConfiguracao(void *params)
+{
+    /* Responsável pelo armazenar as configurações do sistema */
+    /* Armazenar em EEPROM (Flash) = Posso utilizar até 512 bytes (endereços) */
+    /* Pode armazenar valores entre 0 e 255 em cada endereço */
+    /* Comandos a utilizar: */
+    /* EEPROM.begin(qtd. de endereços ) */
+    /* EEPROM.write(endereço, valor) */
+    /* EEPROM.commit() */
+    /* EEPROM.read(endereço) */
+}
+
+void erroFila()
+{
+    #ifdef DEBUG
+        Serial.println("Erro ao colocar dado na fila");
+    #endif
 }
