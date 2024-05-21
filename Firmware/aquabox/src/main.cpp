@@ -37,8 +37,24 @@
 #define SETOR2_DESLIGA      21          //Desliga alguma função - Setor 2
 #define TEMPO_INTERVALO     5           //Tempo de intervalo para iniciar o segundo setor
 
+/* Demasi definesn */
+#define TAMANHO_EEPROM 10
+
 /* Variáveis globais */
 bool flagManutencao = true;
+
+/* Estruturas */
+    struct irrigacaoConf
+    {
+        bool modificado = false;    //flag para indicar se estrutura foi alterada
+        int horaDeInicio = 18;
+        int minutoDeInicio = 29;
+        int tempoDeDuracao = 120;  
+        bool diasDaSemana[7] = {true, true, true, true, true, true, true};
+    };
+
+struct irrigacaoConf conf_Irriga;
+
 
 /* Protótipo das funções e tasks */
 void taskControle(void *params);
@@ -59,11 +75,15 @@ void erroFila();
 QueueHandle_t xQueue_Reles, xQueue_Controle;
 
 /* semaforos utilizados */
+SemaphoreHandle_t xConfig_irrigacao;
 
 void setup() 
 {
     /* Inicializa serial (baudrate 115200) */
     Serial.begin(115200);
+
+    /* Inicialização da região de EEPROM */
+    EEPROM.begin(TAMANHO_EEPROM);
 
     /*Executa a conexão com WiFi via WiFiManager*/
     WiFi.mode(WIFI_STA);
@@ -88,6 +108,9 @@ void setup()
     xQueue_Reles = xQueueCreate(4, sizeof(int));
     xQueue_Controle = xQueueCreate(4, sizeof(int));
 
+    /* Criação dos semaforos */
+    xConfig_irrigacao = xSemaphoreCreateMutex();
+
     //Task de monitoramento e leitura dos sensores de nível
     xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 3, NULL);
 
@@ -99,6 +122,9 @@ void setup()
 
     //Task de controle
     xTaskCreate(taskControle, "Controle", 2048, NULL, 2, NULL);
+
+    //Task de configuração
+    xTaskCreate(taskConfiguracao, "Configuracao", 1024, NULL, 1, NULL);
 }
 
 void loop() 
@@ -403,7 +429,7 @@ void taskRelogio(void *params)
     byte enviaLigaSetor2 = 0;
     byte enviaDesligaSetor2 = 0;
 
-    /* Estrutura para dias e horários para irrigação*/
+/*
     struct horarioDeIrrigacao
     {
         int horaDeInicio;
@@ -411,15 +437,16 @@ void taskRelogio(void *params)
         int tempoDeDuracao;
     };
 
-    /* Vetor dos dias da semana*/
+    
     bool dias[7] = {true, true, true, true, true, true, true};
 
     struct horarioDeIrrigacao horarioSetor1;
     
-    /* Configuração tempo dos Setores */
+    
     horarioSetor1.horaDeInicio = 12;
     horarioSetor1.minutoDeInicio = 25;
-    horarioSetor1.tempoDeDuracao = 1200; //20 minutos
+    horarioSetor1.tempoDeDuracao = 1200; 
+  */  
 
     /* Variáveis para o relógio*/
     const char* ntpServer = "pool.ntp.org";
@@ -448,22 +475,24 @@ void taskRelogio(void *params)
                 tempoDecorrido++;
             }
             
-            if(dias[diaDaSemana] == true)
+            xSemaphoreTake(xConfig_irrigacao, portMAX_DELAY);
+
+            if(conf_Irriga.diasDaSemana[diaDaSemana] == true)
             {
-                if((horarioSetor1.horaDeInicio == timeinfo.tm_hour) & (horarioSetor1.minutoDeInicio == timeinfo.tm_min) & (enviaLigaSetor1 == 1))
+                if((conf_Irriga.horaDeInicio == timeinfo.tm_hour) & (conf_Irriga.minutoDeInicio == timeinfo.tm_min) & (enviaLigaSetor1 == 1))
                 {
                     setorComando = SETOR1_LIGA;
                     iniciarContagem = true;
                     tempoDecorrido = 0;
                 }
-                
-                if ((tempoDecorrido >= horarioSetor1.tempoDeDuracao) & (enviaDesligaSetor1 == 1))
+
+                if ((tempoDecorrido >= conf_Irriga.tempoDeDuracao) & (enviaDesligaSetor1 == 1))
                 {
                     setorComando = SETOR1_DESLIGA;
                     iniciarContagem = false;
                 }
 
-                if((tempoDecorrido >= horarioSetor1.tempoDeDuracao) & (enviaLigaSetor2 == 1))
+                if((tempoDecorrido >= conf_Irriga.tempoDeDuracao) & (enviaLigaSetor2 == 1))
                 {
                     vTaskDelay(5000 / portTICK_PERIOD_MS);     //5 segundos
                     setorComando = SETOR2_LIGA;
@@ -471,7 +500,7 @@ void taskRelogio(void *params)
                     tempoDecorrido = 0;
                     
                 }
-                if((tempoDecorrido >= horarioSetor1.tempoDeDuracao) & (enviaDesligaSetor2 == 1))
+                if((tempoDecorrido >= conf_Irriga.tempoDeDuracao) & (enviaDesligaSetor2 == 1))
                 {
                     setorComando = SETOR2_DESLIGA;
                     iniciarContagem = false;
@@ -484,6 +513,8 @@ void taskRelogio(void *params)
                     Serial.println("Não precisa ligar");
                 #endif
             }
+
+            xSemaphoreGive(xConfig_irrigacao);
         }
 
         switch (setorComando)
@@ -550,9 +581,6 @@ void taskRelogio(void *params)
             setorComando = 0;
             enviaDesligaSetor2 = 0;
             enviaLigaSetor1 = 1;
-
-            //para teste, depois retirar
-            horarioSetor1.horaDeInicio++;
             break;
         
         default:
@@ -575,6 +603,12 @@ void taskConfiguracao(void *params)
     /* EEPROM.write(endereço, valor) */
     /* EEPROM.commit() */
     /* EEPROM.read(endereço) */
+
+    
+    while(true)
+    {
+        
+    }
 }
 
 void erroFila()
