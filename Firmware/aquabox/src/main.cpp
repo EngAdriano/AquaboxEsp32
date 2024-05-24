@@ -1,10 +1,13 @@
 #include "Arduino.h"
 #include <WiFi.h>
+#include <PubSubClient.h>
+#include <WiFiClientSecure.h>
 #include "WiFiManager.h"
 #include "EventoSensores.hpp"
 #include "Relogio.hpp"
 #include "ModuloRele.hpp"
 #include "EEPROM.h"
+
 
 /* Libera prints para debug */
 #define DEBUG
@@ -37,8 +40,18 @@
 #define SETOR2_DESLIGA      21          //Desliga alguma função - Setor 2
 #define TEMPO_INTERVALO     5           //Tempo de intervalo para iniciar o segundo setor
 
-/* Demasi definesn */
+/* Demais defines */
 #define TAMANHO_EEPROM 10
+#define MSG_BUFFER_SIZE 50
+char msg[MSG_BUFFER_SIZE];
+
+const char* mqtt_server = "503847782e204ff99743e99127691fe7.s1.eu.hivemq.cloud";    //Host do broker
+const int porta_TLS = 8883;                                                         //Porta
+const char* mqtt_usuario = "Aquabox";                                               //Usuário
+const char* mqtt_senha = "Liukin@0804";                                             //Senha do usuário
+const char* topico_tx = "Aquabox/tx";                                                        //Tópico para transmitir dados
+const char* topico_rx = "Aquabox/rx";                                                        //Tópico para receber dados
+String cliente_id = "AQUABOX-Liukin120864";
 
 /* Variáveis globais */
 bool flagManutencao = true;
@@ -47,21 +60,20 @@ bool flagManutencao = true;
     struct irrigacaoConf
     {
         bool modificado = false;    //flag para indicar se estrutura foi alterada
-        int horaDeInicio = 18;
-        int minutoDeInicio = 29;
-        int tempoDeDuracao = 120;  
+        int horaDeInicio = 17;
+        int minutoDeInicio = 0;
+        int tempoDeDuracao = 1200;  //20 minutos
         bool diasDaSemana[7] = {true, true, true, true, true, true, true};
     };
 
 struct irrigacaoConf conf_Irriga;
 
-
 /* Protótipo das funções e tasks */
+void taskMqtt(void *params);
 void taskControle(void *params);
 void taskSensores(void *params);
 void taskReles(void *params);
 void taskRelogio(void *params);
-void taskConfiguracao(void *params);
 void btnBombaPressionado();
 void btnBombaLiberado();
 void nivelBaixoPressionado();
@@ -69,13 +81,55 @@ void nivelAltoPressionado();
 void nivelBaixoLiberado();
 void nivelAltoLiberado();
 bool dadoNaFila(int result);
+void escreverEEPROM();
+void lerEEPROM();
 void erroFila();
+void callbackMqtt();
+void reconect();
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Controle;
 
 /* semaforos utilizados */
 SemaphoreHandle_t xConfig_irrigacao;
+
+/* Objetos */
+WiFiClientSecure espCliente;              //Estância o objeto cliente
+PubSubClient cliente_MQTT(espCliente);   //Instancia o Cliente MQTT passando o objeto espClient
+
+static const char *root_ca PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
+A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
+T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
+B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
+B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
+KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
+OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
+jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
+qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
+rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
+hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
+ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
+3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
+NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
+ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
+TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
+jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
+oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
+4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
+mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
+emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
+-----END CERTIFICATE-----
+)EOF";
 
 void setup() 
 {
@@ -84,6 +138,15 @@ void setup()
 
     /* Inicialização da região de EEPROM */
     EEPROM.begin(TAMANHO_EEPROM);
+
+    /* Inicializar a EEPROM */
+    lerEEPROM();
+
+    /* Inicializa pela primeira vez */
+    if(EEPROM.read(0) != 1 || EEPROM.read(0) != 0)
+    {
+        escreverEEPROM();
+    }
 
     /*Executa a conexão com WiFi via WiFiManager*/
     WiFi.mode(WIFI_STA);
@@ -102,6 +165,9 @@ void setup()
             Serial.println("Conectado...");
         #endif
     }
+
+    /* Id do cliente MQTT - único */
+    cliente_id = String(WiFi.macAddress());
     
     //Criação da fila (Queue)
     ////Ao inicializar a fila devemos passar o tamanho dela e o tipo de dado. Pode ser inclusive estruturas
@@ -123,8 +189,8 @@ void setup()
     //Task de controle
     xTaskCreate(taskControle, "Controle", 2048, NULL, 2, NULL);
 
-    //Task de configuração
-    xTaskCreate(taskConfiguracao, "Configuracao", 1024, NULL, 1, NULL);
+    //Task de comunicação MQTT
+    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 4, NULL);
 }
 
 void loop() 
@@ -135,6 +201,59 @@ void loop()
 /* --------------------------------------------------*/
 /* --------------- Tarefas / Funções ----------------*/
 /* --------------------------------------------------*/
+
+void taskMqtt(void *params)
+{
+    int NumeroDeMensagens = 0;
+    unsigned long lastMsg = 0; 
+    espCliente.setCACert(root_ca);
+    cliente_MQTT.setServer(mqtt_server, porta_TLS);
+    //cliente_MQTT.setCallback(callbackMqtt);
+    cliente_MQTT.subscribe(topico_tx);
+
+    while(true)
+    {
+        if(!cliente_MQTT.connected())
+        {
+                reconect();
+        }
+        cliente_MQTT.loop();
+
+        if(NumeroDeMensagens < 1)
+        {
+            cliente_MQTT.publish(topico_tx, "Testado e funcionando");
+            NumeroDeMensagens++;
+            #ifdef DEBUG
+            Serial.println("Conectado ao MQTT");
+        #endif
+        }
+    }
+}
+
+void callbackMqtt()
+{
+
+}
+
+void reconect()
+{
+    if(cliente_MQTT.connect(cliente_id.c_str(), mqtt_usuario, mqtt_senha))
+    {
+        #ifdef DEBUG
+            Serial.println("Conectado via reconect ao MQTT");
+        #endif
+
+        cliente_MQTT.subscribe(topico_tx);
+        cliente_MQTT.subscribe(topico_rx);
+    }
+    else
+    {
+        #ifdef DEBUG
+            Serial.println("Erro na conexão - Tentar novamente em 5 segundos");
+        #endif
+        vTaskDelay( 5000 / portTICK_PERIOD_MS );
+    }
+}
 
 void taskControle(void *params)
 {
@@ -163,7 +282,7 @@ void taskControle(void *params)
             flagManutencao = true;
         }
 
-        if (receive >= DESLIGA_RELES & receive <= LIGA_SETOR2 & flagManutencao == true)
+        if (receive >= DESLIGA_RELES && receive <= LIGA_SETOR2 && flagManutencao == true)
         {
             result = xQueueSend(xQueue_Reles, &receive, 500 / portTICK_PERIOD_MS);
             erro = dadoNaFila(result);
@@ -429,25 +548,6 @@ void taskRelogio(void *params)
     byte enviaLigaSetor2 = 0;
     byte enviaDesligaSetor2 = 0;
 
-/*
-    struct horarioDeIrrigacao
-    {
-        int horaDeInicio;
-        int minutoDeInicio;
-        int tempoDeDuracao;
-    };
-
-    
-    bool dias[7] = {true, true, true, true, true, true, true};
-
-    struct horarioDeIrrigacao horarioSetor1;
-    
-    
-    horarioSetor1.horaDeInicio = 12;
-    horarioSetor1.minutoDeInicio = 25;
-    horarioSetor1.tempoDeDuracao = 1200; 
-  */  
-
     /* Variáveis para o relógio*/
     const char* ntpServer = "pool.ntp.org";
     const long  gmtOffset_sec = -14400; //GMT Time Brazil
@@ -479,20 +579,20 @@ void taskRelogio(void *params)
 
             if(conf_Irriga.diasDaSemana[diaDaSemana] == true)
             {
-                if((conf_Irriga.horaDeInicio == timeinfo.tm_hour) & (conf_Irriga.minutoDeInicio == timeinfo.tm_min) & (enviaLigaSetor1 == 1))
+                if((conf_Irriga.horaDeInicio == timeinfo.tm_hour) && (conf_Irriga.minutoDeInicio == timeinfo.tm_min) && (enviaLigaSetor1 == 1))
                 {
                     setorComando = SETOR1_LIGA;
                     iniciarContagem = true;
                     tempoDecorrido = 0;
                 }
 
-                if ((tempoDecorrido >= conf_Irriga.tempoDeDuracao) & (enviaDesligaSetor1 == 1))
+                if ((tempoDecorrido >= conf_Irriga.tempoDeDuracao) && (enviaDesligaSetor1 == 1))
                 {
                     setorComando = SETOR1_DESLIGA;
                     iniciarContagem = false;
                 }
 
-                if((tempoDecorrido >= conf_Irriga.tempoDeDuracao) & (enviaLigaSetor2 == 1))
+                if((tempoDecorrido >= conf_Irriga.tempoDeDuracao) && (enviaLigaSetor2 == 1))
                 {
                     vTaskDelay(5000 / portTICK_PERIOD_MS);     //5 segundos
                     setorComando = SETOR2_LIGA;
@@ -500,7 +600,7 @@ void taskRelogio(void *params)
                     tempoDecorrido = 0;
                     
                 }
-                if((tempoDecorrido >= conf_Irriga.tempoDeDuracao) & (enviaDesligaSetor2 == 1))
+                if((tempoDecorrido >= conf_Irriga.tempoDeDuracao) && (enviaDesligaSetor2 == 1))
                 {
                     setorComando = SETOR2_DESLIGA;
                     iniciarContagem = false;
@@ -593,22 +693,46 @@ void taskRelogio(void *params)
     }
 }
 
-void taskConfiguracao(void *params)
+void escreverEEPROM()
 {
-    /* Responsável pelo armazenar as configurações do sistema */
-    /* Armazenar em EEPROM (Flash) = Posso utilizar até 512 bytes (endereços) */
-    /* Pode armazenar valores entre 0 e 255 em cada endereço */
-    /* Comandos a utilizar: */
-    /* EEPROM.begin(qtd. de endereços ) */
-    /* EEPROM.write(endereço, valor) */
-    /* EEPROM.commit() */
-    /* EEPROM.read(endereço) */
+    EEPROM.write(0, conf_Irriga.modificado);
+    EEPROM.write(1, conf_Irriga.horaDeInicio);
+    EEPROM.write(2, conf_Irriga.minutoDeInicio);
+    EEPROM.write(3, conf_Irriga.tempoDeDuracao);
+    EEPROM.write(4, conf_Irriga.diasDaSemana[0]);
+    EEPROM.write(5, conf_Irriga.diasDaSemana[1]);
+    EEPROM.write(6, conf_Irriga.diasDaSemana[2]);
+    EEPROM.write(7, conf_Irriga.diasDaSemana[3]);
+    EEPROM.write(8, conf_Irriga.diasDaSemana[4]);
+    EEPROM.write(9, conf_Irriga.diasDaSemana[5]);
+    EEPROM.write(10, conf_Irriga.diasDaSemana[6]);
+    EEPROM.commit();
 
-    
-    while(true)
-    {
-        
-    }
+    #ifdef DEBUG
+        Serial.println("EEPROM Gravada");
+    #endif
+}
+
+void lerEEPROM()
+{
+    conf_Irriga.modificado = EEPROM.read(0);
+    conf_Irriga.horaDeInicio = EEPROM.read(1);
+    conf_Irriga.minutoDeInicio = EEPROM.read(2);
+    conf_Irriga.tempoDeDuracao = EEPROM.read(3);
+    conf_Irriga.diasDaSemana[0] = EEPROM.read(4);
+    conf_Irriga.diasDaSemana[1] = EEPROM.read(5);
+    conf_Irriga.diasDaSemana[2] = EEPROM.read(6);
+    conf_Irriga.diasDaSemana[3] = EEPROM.read(7);
+    conf_Irriga.diasDaSemana[4] = EEPROM.read(8);
+    conf_Irriga.diasDaSemana[5] = EEPROM.read(9);
+    conf_Irriga.diasDaSemana[6] = EEPROM.read(10);
+
+    #ifdef DEBUG
+        Serial.println("EEPROM lida");
+        Serial.println(conf_Irriga.modificado);
+        Serial.println(conf_Irriga.horaDeInicio);
+
+    #endif
 }
 
 void erroFila()
@@ -617,3 +741,4 @@ void erroFila()
         Serial.println("Erro ao colocar dado na fila");
     #endif
 }
+
