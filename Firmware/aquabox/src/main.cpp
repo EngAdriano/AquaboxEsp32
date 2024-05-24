@@ -41,7 +41,7 @@
 #define TEMPO_INTERVALO     5           //Tempo de intervalo para iniciar o segundo setor
 
 /* Demais defines */
-#define TAMANHO_EEPROM 10
+#define TAMANHO_EEPROM 11
 #define MSG_BUFFER_SIZE 50
 char msg[MSG_BUFFER_SIZE];
 
@@ -59,11 +59,13 @@ bool flagManutencao = true;
 /* Estruturas */
     struct irrigacaoConf
     {
-        bool modificado = false;    //flag para indicar se estrutura foi alterada
-        int horaDeInicio = 17;
-        int minutoDeInicio = 0;
-        int tempoDeDuracao = 1200;  //20 minutos
-        bool diasDaSemana[7] = {true, true, true, true, true, true, true};
+        uint8_t modificado = 0;    //flag para indicar se estrutura foi alterada
+        uint8_t horaDeInicio = 17;
+        uint8_t minutoDeInicio = 0;
+        uint8_t Duracao = 20;  //20 minutos
+        uint8_t diasDaSemana[7] = {1, 1, 1, 1, 1, 1, 1};
+        int tempoDeDuracao = Duracao*60;  //20 minutos      //Tempo utilizado no programa
+        
     };
 
 struct irrigacaoConf conf_Irriga;
@@ -86,6 +88,7 @@ void lerEEPROM();
 void erroFila();
 void callbackMqtt();
 void reconect();
+void publicarMensagem(const char* topico, String payload , boolean retencao);
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Controle;
@@ -131,6 +134,7 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
 
+
 void setup() 
 {
     /* Inicializa serial (baudrate 115200) */
@@ -138,16 +142,9 @@ void setup()
 
     /* Inicialização da região de EEPROM */
     EEPROM.begin(TAMANHO_EEPROM);
-
-    /* Inicializar a EEPROM */
+    //escreverEEPROM();
     lerEEPROM();
-
-    /* Inicializa pela primeira vez */
-    if(EEPROM.read(0) != 1 || EEPROM.read(0) != 0)
-    {
-        escreverEEPROM();
-    }
-
+    
     /*Executa a conexão com WiFi via WiFiManager*/
     WiFi.mode(WIFI_STA);
     WiFiManager wm;
@@ -219,6 +216,7 @@ void taskMqtt(void *params)
         }
         cliente_MQTT.loop();
 
+    /*
         if(NumeroDeMensagens < 1)
         {
             cliente_MQTT.publish(topico_tx, "Testado e funcionando");
@@ -226,7 +224,7 @@ void taskMqtt(void *params)
             #ifdef DEBUG
             Serial.println("Conectado ao MQTT");
         #endif
-        }
+        }*/
     }
 }
 
@@ -252,6 +250,16 @@ void reconect()
             Serial.println("Erro na conexão - Tentar novamente em 5 segundos");
         #endif
         vTaskDelay( 5000 / portTICK_PERIOD_MS );
+    }
+}
+
+void publicarMensagem(const char* topico, String payload , boolean retencao)
+{
+    if (cliente_MQTT.publish(topico, payload.c_str(), true))
+    {
+        #ifdef DEBUG
+        Serial.println("Mensagem Publicada ["+String(topico)+"]: "+ payload);
+        #endif
     }
 }
 
@@ -577,7 +585,7 @@ void taskRelogio(void *params)
             
             xSemaphoreTake(xConfig_irrigacao, portMAX_DELAY);
 
-            if(conf_Irriga.diasDaSemana[diaDaSemana] == true)
+            if(conf_Irriga.diasDaSemana[diaDaSemana] == 1)
             {
                 if((conf_Irriga.horaDeInicio == timeinfo.tm_hour) && (conf_Irriga.minutoDeInicio == timeinfo.tm_min) && (enviaLigaSetor1 == 1))
                 {
@@ -695,30 +703,32 @@ void taskRelogio(void *params)
 
 void escreverEEPROM()
 {
-    EEPROM.write(0, conf_Irriga.modificado);
-    EEPROM.write(1, conf_Irriga.horaDeInicio);
-    EEPROM.write(2, conf_Irriga.minutoDeInicio);
-    EEPROM.write(3, conf_Irriga.tempoDeDuracao);
-    EEPROM.write(4, conf_Irriga.diasDaSemana[0]);
-    EEPROM.write(5, conf_Irriga.diasDaSemana[1]);
-    EEPROM.write(6, conf_Irriga.diasDaSemana[2]);
-    EEPROM.write(7, conf_Irriga.diasDaSemana[3]);
-    EEPROM.write(8, conf_Irriga.diasDaSemana[4]);
-    EEPROM.write(9, conf_Irriga.diasDaSemana[5]);
-    EEPROM.write(10, conf_Irriga.diasDaSemana[6]);
+    EEPROM.write(0,conf_Irriga.modificado);
+    EEPROM.write(1,conf_Irriga.horaDeInicio);
+    EEPROM.write(2,conf_Irriga.minutoDeInicio);
+    EEPROM.write(3,(conf_Irriga.Duracao));
+    EEPROM.write(4,conf_Irriga.diasDaSemana[0]);
+    EEPROM.write(5,conf_Irriga.diasDaSemana[1]);
+    EEPROM.write(6,conf_Irriga.diasDaSemana[2]);
+    EEPROM.write(7,conf_Irriga.diasDaSemana[3]);
+    EEPROM.write(8,conf_Irriga.diasDaSemana[4]);
+    EEPROM.write(9,conf_Irriga.diasDaSemana[5]);
+    EEPROM.write(10,conf_Irriga.diasDaSemana[6]);
     EEPROM.commit();
 
     #ifdef DEBUG
         Serial.println("EEPROM Gravada");
     #endif
+
 }
 
 void lerEEPROM()
 {
+  
     conf_Irriga.modificado = EEPROM.read(0);
     conf_Irriga.horaDeInicio = EEPROM.read(1);
     conf_Irriga.minutoDeInicio = EEPROM.read(2);
-    conf_Irriga.tempoDeDuracao = EEPROM.read(3);
+    conf_Irriga.Duracao = EEPROM.read(3);
     conf_Irriga.diasDaSemana[0] = EEPROM.read(4);
     conf_Irriga.diasDaSemana[1] = EEPROM.read(5);
     conf_Irriga.diasDaSemana[2] = EEPROM.read(6);
@@ -731,8 +741,18 @@ void lerEEPROM()
         Serial.println("EEPROM lida");
         Serial.println(conf_Irriga.modificado);
         Serial.println(conf_Irriga.horaDeInicio);
-
+        Serial.println(conf_Irriga.minutoDeInicio);
+        Serial.println(conf_Irriga.Duracao);
+        Serial.println(conf_Irriga.diasDaSemana[0]);
+        Serial.println(conf_Irriga.diasDaSemana[1]);
+        Serial.println(conf_Irriga.diasDaSemana[2]);
+        Serial.println(conf_Irriga.diasDaSemana[3]);
+        Serial.println(conf_Irriga.diasDaSemana[4]);
+        Serial.println(conf_Irriga.diasDaSemana[5]);
+        Serial.println(conf_Irriga.diasDaSemana[6]);
+        Serial.println(conf_Irriga.tempoDeDuracao);
     #endif
+ 
 }
 
 void erroFila()
