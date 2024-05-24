@@ -175,19 +175,19 @@ void setup()
     xConfig_irrigacao = xSemaphoreCreateMutex();
 
     //Task de monitoramento e leitura dos sensores de nível
-    xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 3, NULL);
+    xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 4, NULL);
 
     //Task para trabalhos co relógio de tempo real
-    xTaskCreate(taskSensores, "Sensores", 2048, NULL, 2, NULL); 
+    xTaskCreate(taskSensores, "Sensores", 2048, NULL, 5, NULL); 
 
     //Task de acionamento dos relés
-    xTaskCreate(taskReles, "Reles", 1024, NULL, 1,NULL);
+    xTaskCreate(taskReles, "Reles", 1024, NULL, 5,NULL);
 
     //Task de controle
-    xTaskCreate(taskControle, "Controle", 2048, NULL, 2, NULL);
+    xTaskCreate(taskControle, "Controle", 2048, NULL, 5, NULL);
 
     //Task de comunicação MQTT
-    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 4, NULL);
+    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 2, NULL);
 }
 
 void loop() 
