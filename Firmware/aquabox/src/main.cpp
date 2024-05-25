@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 #include "WiFiManager.h"
 #include "EventoSensores.hpp"
 #include "Relogio.hpp"
@@ -201,6 +202,16 @@ void taskMqtt(void *params)
 {
     bool mqttStatus = 0;
 
+    /* Exemplo de gerar json */
+    /*
+    int temp = random(230, 300);
+    int volts = random(20, 24);
+    int umidade = random(80, 100);
+    char buf[100];
+    sniprintf(buf, sizeof(buf), "{\"temp\":%d, \"volts\":%d, \"umidade\":%d}", temp, volts, umidade);
+    Serial.println(buf);
+    */
+
     mqttStatus = conecteMQTT();
 
    while(true)
@@ -253,7 +264,7 @@ bool conecteMQTT()
         //publish e subscribe
         cliente_MQTT.subscribe(topico_tx);
         cliente_MQTT.subscribe(topico_rx);
-        cliente_MQTT.publish(topico_tx, "{Teste de transmissão de MQTT}");
+        //cliente_MQTT.publish(topico_tx, "{Teste de transmissão de MQTT}");
         return 1;
     }
     else
@@ -269,19 +280,48 @@ bool conecteMQTT()
 void callbackMqtt(char *topico, byte *payload, unsigned int length)
 {
     #ifdef DEBUG
-        Serial.print("Mensagem recebida do tópico: ");
-        Serial.println(topico);
-        Serial.print("Mensagem: ");
-        for(int i = 0; i < length; i++)
-        {
-            Serial.print((char) payload[i]);
-            msgRX += (char)payload[i];
-        }
-        Serial.println();
-        Serial.println("---------------------------------------------------");
+        //Serial.print("Mensagem recebida do tópico: ");
+        //Serial.println(topico);
+        //Serial.print("Mensagem: ");
+    #endif
+    for(int i = 0; i < length; i++)
+    {
+        //Serial.print((char) payload[i]);
+        msgRX += (char)payload[i];
+    }
+
+    #ifdef DEBUG
+    //Serial.println(msgRX);        //Retirar. apenas para teste
     #endif
 
-    Serial.println(msgRX);        //Retirar. apenas para teste
+    // Aloca o documento JSON
+    // Entre colchetes, 200 é a capacidade do pool de memória em bytes.
+    // Não se esqueça de alterar este valor para corresponder ao seu documento JSON.
+    // Use arduinojson.org/v6/assistant para calcular a capacidade.
+    //StaticJsonDocument<200> doc;
+    JsonDocument doc;
+
+    DeserializationError error = deserializeJson(doc, msgRX);
+
+    if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    return;
+    }
+
+    const char* comando = doc["comando"];
+    const char* campo1 = doc["campo1"];
+    int campo2 = doc["campo2"];
+    double latitude = doc["data"][0];
+    double longitude = doc["data"][1];
+
+    // Print values.
+    Serial.println(comando);
+    Serial.println(campo1);
+    Serial.println(campo2);
+    Serial.println(latitude, 6);
+    Serial.println(longitude, 6);
+
     msgRX = "";
 }
 
