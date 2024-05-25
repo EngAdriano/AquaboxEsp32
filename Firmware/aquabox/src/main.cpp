@@ -51,10 +51,9 @@ const char* mqtt_usuario = "Aquabox";                                           
 const char* mqtt_senha = "Liukin@0804";                                             //Senha do usuário
 const char* topico_tx = "Aquabox/tx";                                                        //Tópico para transmitir dados
 const char* topico_rx = "Aquabox/rx";                                                        //Tópico para receber dados
-String cliente_id = "AQUABOX-Liukin120864";
 
 /* Variáveis globais */
-bool flagManutencao = true;
+bool flagManutencao = true;     //Utilizar para o botão manutenção
 
 /* Estruturas */
     struct irrigacaoConf
@@ -86,7 +85,8 @@ bool dadoNaFila(int result);
 void escreverEEPROM();
 void lerEEPROM();
 void erroFila();
-void callbackMqtt();
+bool conecteMQTT();
+void callbackMqtt(char *topico, byte *payload, unsigned int length);
 void reconect();
 void publicarMensagem(const char* topico, String payload , boolean retencao);
 
@@ -97,8 +97,8 @@ QueueHandle_t xQueue_Reles, xQueue_Controle;
 SemaphoreHandle_t xConfig_irrigacao;
 
 /* Objetos */
-WiFiClientSecure espCliente;              //Estância o objeto cliente
-PubSubClient cliente_MQTT(espCliente);   //Instancia o Cliente MQTT passando o objeto espClient
+WiFiClientSecure espCliente;                //Estância o objeto cliente
+PubSubClient cliente_MQTT(espCliente);      //Instancia o Cliente MQTT passando o objeto espClient
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -162,9 +162,6 @@ void setup()
             Serial.println("Conectado...");
         #endif
     }
-
-    /* Id do cliente MQTT - único */
-    cliente_id = String(WiFi.macAddress());
     
     //Criação da fila (Queue)
     ////Ao inicializar a fila devemos passar o tamanho dela e o tipo de dado. Pode ser inclusive estruturas
@@ -187,7 +184,7 @@ void setup()
     xTaskCreate(taskControle, "Controle", 2048, NULL, 5, NULL);
 
     //Task de comunicação MQTT
-    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 2, NULL);
+    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
 }
 
 void loop() 
@@ -201,56 +198,87 @@ void loop()
 
 void taskMqtt(void *params)
 {
-    int NumeroDeMensagens = 0;
-    unsigned long lastMsg = 0; 
-    espCliente.setCACert(root_ca);
-    cliente_MQTT.setServer(mqtt_server, porta_TLS);
-    //cliente_MQTT.setCallback(callbackMqtt);
-    cliente_MQTT.subscribe(topico_tx);
+    bool mqttStatus = 0;
 
-    while(true)
+    mqttStatus = conecteMQTT();
+
+   while(true)
     {
-        if(!cliente_MQTT.connected())
+        if(mqttStatus)
         {
-                reconect();
+            cliente_MQTT.loop();
         }
-        cliente_MQTT.loop();
-
-    /*
-        if(NumeroDeMensagens < 1)
-        {
-            cliente_MQTT.publish(topico_tx, "Testado e funcionando");
-            NumeroDeMensagens++;
-            #ifdef DEBUG
-            Serial.println("Conectado ao MQTT");
-        #endif
-        }*/
     }
 }
 
-void callbackMqtt()
+bool conecteMQTT()
 {
+    byte tentativa = 0;
+    espCliente.setCACert(root_ca);
+    cliente_MQTT.setServer(mqtt_server, porta_TLS);
+    cliente_MQTT.setCallback(callbackMqtt);
 
-}
+    do
+    {
+        /* Id do cliente MQTT - único */
+        String cliente_id = "AQUABOX-";
+        cliente_id += String(WiFi.macAddress());
 
-void reconect()
-{
-    if(cliente_MQTT.connect(cliente_id.c_str(), mqtt_usuario, mqtt_senha))
+        if(cliente_MQTT.connect(cliente_id.c_str(), mqtt_usuario, mqtt_senha))
     {
         #ifdef DEBUG
-            Serial.println("Conectado via reconect ao MQTT");
+            Serial.println("Êxito na conexão:");
+            Serial.printf("Cliente %s conectado ao broker\n", cliente_id.c_str());
         #endif
-
-        cliente_MQTT.subscribe(topico_tx);
-        cliente_MQTT.subscribe(topico_rx);
     }
     else
     {
         #ifdef DEBUG
-            Serial.println("Erro na conexão - Tentar novamente em 5 segundos");
+            Serial.print("Falha ao conectar: ");
+            Serial.print(cliente_MQTT.state());
+            Serial.println();
+            Serial.print("Tentativa: ");
+            Serial.println(tentativa);
         #endif
-        vTaskDelay( 5000 / portTICK_PERIOD_MS );
+        vTaskDelay( 2000 / portTICK_PERIOD_MS );
     }
+
+    tentativa++;
+
+    } while (!cliente_MQTT.connected() && tentativa < 5);
+
+    if(tentativa < 5)
+    {
+        //publish e subscribe
+        cliente_MQTT.subscribe(topico_tx);
+        cliente_MQTT.subscribe(topico_rx);
+        cliente_MQTT.publish(topico_tx, "{Teste de transmissão de MQTT}");
+        return 1;
+    }
+    else
+    {
+        #ifdef DEBUG
+            Serial.println("Não conectado");
+        #endif
+        return 0;
+    }
+    
+}
+
+void callbackMqtt(char *topico, byte *payload, unsigned int length)
+{
+    #ifdef DEBUG
+        Serial.print("Mensagem recebida do tópico: ");
+        Serial.println(topico);
+        Serial.print("Mensagem: ");
+        for(int i = 0; i < length; i++)
+        {
+            Serial.print((char) payload[i]);
+        }
+        Serial.println();
+        Serial.println("---------------------------------------------------");
+    #endif
+
 }
 
 void publicarMensagem(const char* topico, String payload , boolean retencao)
