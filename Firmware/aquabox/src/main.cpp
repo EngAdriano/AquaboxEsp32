@@ -44,6 +44,7 @@
 #define TAMANHO_EEPROM 11
 #define MSG_BUFFER_SIZE 50
 char msg[MSG_BUFFER_SIZE];
+String msgRX;
 
 const char* mqtt_server = "503847782e204ff99743e99127691fe7.s1.eu.hivemq.cloud";    //Host do broker
 const int porta_TLS = 8883;                                                         //Porta
@@ -274,11 +275,14 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         for(int i = 0; i < length; i++)
         {
             Serial.print((char) payload[i]);
+            msgRX += (char)payload[i];
         }
         Serial.println();
         Serial.println("---------------------------------------------------");
     #endif
 
+    Serial.println(msgRX);        //Retirar. apenas para teste
+    msgRX = "";
 }
 
 void publicarMensagem(const char* topico, String payload , boolean retencao)
@@ -351,9 +355,6 @@ void taskSensores(void *params)
         nivelBaixo.process();
         nivelAlto.process();
         btnBomba.process();
-
-        /* Espera um segundo */
-        vTaskDelay( 100 / portTICK_PERIOD_MS ); 
     }
 }
 
