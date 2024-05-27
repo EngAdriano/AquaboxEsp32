@@ -331,20 +331,20 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
 
     if(comando == CONFIGURACAO)
     {
-        /* Modelo do Json de configuração recebido */
+        /* Modelo do Json de configuração recebido - Exemplo */
         /*
             {
-                "comando": "valor",
+                "comando": "300",
                 "horaDeInicio": "valor",
                 "minutoDeInicio": "valor",
                 "duracao": "valor",
-                "dom": "valor",
-                "seg": "valor",
-                "ter": "valor",
-                "qua": "valor",
-                "qui": "valor",
-                "sex": "valor",
-                "sab": "valor"
+                "dom": "1",
+                "seg": "1",
+                "ter": "1",
+                "qua": "1",
+                "qui": "1",
+                "sex": "1",
+                "sab": "1"
             }
         */
 
@@ -378,12 +378,12 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         Serial.println(conf_Irriga.tempoDeDuracao);
         #endif
 
+        /* Gravar na EEPROM */
         escreverEEPROM();
         lerEEPROM();
 
         xSemaphoreGive(xConfig_irrigacao);
-
-        
+        comando = 0;
     }
 
     if(comando == STATUS)
@@ -391,7 +391,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         /* Modelo do Json de configuração recebido */
         /*
             {
-                "comando": "valor"
+                "comando": "301"
             }
         */
 
@@ -402,11 +402,20 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
             erroFila();
             erro = true;
         }
+        comando = 0;
     }
 
     if(comando == RE_START)
     {
+        /* Modelo do Json de configuração recebido */
+        /*
+            {
+                "comando": "302"
+            }
+        */
         /* Comando para reinicializar o ESP32 */
+        esp_restart();
+        comando = 0;
     }
     
     msgRX = "";
