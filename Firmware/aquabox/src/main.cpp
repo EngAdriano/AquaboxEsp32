@@ -40,6 +40,8 @@
 #define SETOR2_LIGA         20          //Liga alguma função - Setor 2
 #define SETOR2_DESLIGA      21          //Desliga alguma função - Setor 2
 #define TEMPO_INTERVALO     5           //Tempo de intervalo para iniciar o segundo setor
+#define CONFIGURACAO        300         //Comando para alterar a configuração de irrigação
+#define INFORMACOES         301         //Comando para o Aquabox enviar informações sobre o sistema
 
 /* Demais defines */
 #define TAMANHO_EEPROM 11
@@ -63,9 +65,9 @@ bool flagManutencao = true;     //Utilizar para o botão manutenção
         uint8_t modificado = 0;    //flag para indicar se estrutura foi alterada
         uint8_t horaDeInicio = 17;
         uint8_t minutoDeInicio = 0;
-        uint8_t Duracao = 20;  //20 minutos
+        uint8_t duracao = 20;  //20 minutos
         uint8_t diasDaSemana[7] = {1, 1, 1, 1, 1, 1, 1};
-        int tempoDeDuracao = Duracao*60;  //20 minutos      //Tempo utilizado no programa
+        int tempoDeDuracao = duracao*60;  //20 minutos      //Tempo utilizado no programa
         
     };
 
@@ -89,7 +91,6 @@ void lerEEPROM();
 void erroFila();
 bool conecteMQTT();
 void callbackMqtt(char *topico, byte *payload, unsigned int length);
-void reconect();
 void publicarMensagem(const char* topico, String payload , boolean retencao);
 
 /* filas (queues) */
@@ -202,16 +203,6 @@ void taskMqtt(void *params)
 {
     bool mqttStatus = 0;
 
-    /* Exemplo de gerar json */
-    /*
-    int temp = random(230, 300);
-    int volts = random(20, 24);
-    int umidade = random(80, 100);
-    char buf[100];
-    sniprintf(buf, sizeof(buf), "{\"temp\":%d, \"volts\":%d, \"umidade\":%d}", temp, volts, umidade);
-    Serial.println(buf);
-    */
-
     mqttStatus = conecteMQTT();
 
    while(true)
@@ -262,7 +253,7 @@ bool conecteMQTT()
     if(tentativa < 5)
     {
         //publish e subscribe
-        cliente_MQTT.subscribe(topico_tx);
+        //cliente_MQTT.subscribe(topico_tx);
         cliente_MQTT.subscribe(topico_rx);
         //cliente_MQTT.publish(topico_tx, "{Teste de transmissão de MQTT}");
         return 1;
@@ -279,6 +270,9 @@ bool conecteMQTT()
 
 void callbackMqtt(char *topico, byte *payload, unsigned int length)
 {
+    int result = 0;
+    bool erro = true;
+
     #ifdef DEBUG
         //Serial.print("Mensagem recebida do tópico: ");
         //Serial.println(topico);
@@ -304,24 +298,87 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
     DeserializationError error = deserializeJson(doc, msgRX);
 
     if (error) {
-    Serial.print("deserializeJson() failed: ");
-    Serial.println(error.c_str());
+        #ifdef DEBUG
+            Serial.print("deserializeJson() failed: ");
+            Serial.println(error.c_str());
+        #endif
     return;
     }
 
-    const char* comando = doc["comando"];
-    const char* campo1 = doc["campo1"];
-    int campo2 = doc["campo2"];
-    double latitude = doc["data"][0];
-    double longitude = doc["data"][1];
+    int comando = doc["comando"];
 
-    // Print values.
-    Serial.println(comando);
-    Serial.println(campo1);
-    Serial.println(campo2);
-    Serial.println(latitude, 6);
-    Serial.println(longitude, 6);
+    if(comando >= DESLIGA_RELES && comando <= LIGA_SETOR2 )
+    {
+        /* Modelo do Json de configuração recebido */
+        /*
+            {
+                "comando": "valor"
+            }
+        */
 
+        result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+        erro = dadoNaFila(result);
+        if(!erro)
+        {
+            erroFila();
+            erro = true;
+        }
+    }
+
+    if(comando == CONFIGURACAO)
+    {
+        /* Modelo do Json de configuração recebido */
+        /*
+            {
+                "comando": "valor",
+                "horaDeInicio": "valor",
+                "minutoDeInicio": "valor",
+                "duracao": "valor",
+                "dom": "valor",
+                "seg": "valor",
+                "ter": "valor",
+                "qua": "valor",
+                "qui": "valor",
+                "sex": "valor",
+                "sab": "valor"
+            }
+        */
+
+        xSemaphoreTake(xConfig_irrigacao, portMAX_DELAY);
+
+        conf_Irriga.modificado = 1;
+        conf_Irriga.horaDeInicio = doc["horaDeInicio"];
+        conf_Irriga.minutoDeInicio = doc["minutoDeInicio"];
+        conf_Irriga.duracao = doc["duracao"];
+        conf_Irriga.diasDaSemana[0] = doc["dom"];
+        conf_Irriga.diasDaSemana[1] = doc["seg"];
+        conf_Irriga.diasDaSemana[2] = doc["ter"];
+        conf_Irriga.diasDaSemana[3] = doc["qua"];
+        conf_Irriga.diasDaSemana[4] = doc["qui"];
+        conf_Irriga.diasDaSemana[5] = doc["sex"];
+        conf_Irriga.diasDaSemana[6] = doc["sab"];
+
+         xSemaphoreGive(xConfig_irrigacao);
+    }
+
+    if(comando == INFORMACOES)
+    {
+        /* Modelo do Json de configuração recebido */
+        /*
+            {
+                "comando": "valor"
+            }
+        */
+
+        result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+        erro = dadoNaFila(result);
+        if(!erro)
+        {
+            erroFila();
+            erro = true;
+        }
+    }
+    
     msgRX = "";
 }
 
@@ -344,6 +401,26 @@ void taskControle(void *params)
 
     while(true)
     {
+        if(conf_Irriga.modificado == 1)
+        {
+            conf_Irriga.modificado = 0;
+            escreverEEPROM();
+            #ifdef DEBUG
+                Serial.println("Configuração Alterada");
+                Serial.println(conf_Irriga.modificado);
+                Serial.println(conf_Irriga.horaDeInicio);
+                Serial.println(conf_Irriga.minutoDeInicio);
+                Serial.println(conf_Irriga.duracao);
+                Serial.println(conf_Irriga.diasDaSemana[0]);
+                Serial.println(conf_Irriga.diasDaSemana[1]);
+                Serial.println(conf_Irriga.diasDaSemana[2]);
+                Serial.println(conf_Irriga.diasDaSemana[3]);
+                Serial.println(conf_Irriga.diasDaSemana[4]);
+                Serial.println(conf_Irriga.diasDaSemana[5]);
+                Serial.println(conf_Irriga.diasDaSemana[6]);
+                Serial.println(conf_Irriga.tempoDeDuracao);
+            #endif
+        }
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Controle, (void *)&receive, portMAX_DELAY);
 
@@ -371,6 +448,16 @@ void taskControle(void *params)
                 erroFila();
                 erro = true;
             }
+        }
+
+        if(receive == INFORMACOES)
+        {
+            //TODO - Fazer rotina de envio das informações via MQTT
+
+            #ifdef DEBUG
+                Serial.print("Comando para envio de informações recebido: ");
+                Serial.println(receive);
+            #endif
         }
     }
 }
@@ -775,7 +862,7 @@ void escreverEEPROM()
     EEPROM.write(0,conf_Irriga.modificado);
     EEPROM.write(1,conf_Irriga.horaDeInicio);
     EEPROM.write(2,conf_Irriga.minutoDeInicio);
-    EEPROM.write(3,(conf_Irriga.Duracao));
+    EEPROM.write(3,(conf_Irriga.duracao));
     EEPROM.write(4,conf_Irriga.diasDaSemana[0]);
     EEPROM.write(5,conf_Irriga.diasDaSemana[1]);
     EEPROM.write(6,conf_Irriga.diasDaSemana[2]);
@@ -797,7 +884,7 @@ void lerEEPROM()
     conf_Irriga.modificado = EEPROM.read(0);
     conf_Irriga.horaDeInicio = EEPROM.read(1);
     conf_Irriga.minutoDeInicio = EEPROM.read(2);
-    conf_Irriga.Duracao = EEPROM.read(3);
+    conf_Irriga.duracao = EEPROM.read(3);
     conf_Irriga.diasDaSemana[0] = EEPROM.read(4);
     conf_Irriga.diasDaSemana[1] = EEPROM.read(5);
     conf_Irriga.diasDaSemana[2] = EEPROM.read(6);
@@ -811,7 +898,7 @@ void lerEEPROM()
         Serial.println(conf_Irriga.modificado);
         Serial.println(conf_Irriga.horaDeInicio);
         Serial.println(conf_Irriga.minutoDeInicio);
-        Serial.println(conf_Irriga.Duracao);
+        Serial.println(conf_Irriga.duracao);
         Serial.println(conf_Irriga.diasDaSemana[0]);
         Serial.println(conf_Irriga.diasDaSemana[1]);
         Serial.println(conf_Irriga.diasDaSemana[2]);
