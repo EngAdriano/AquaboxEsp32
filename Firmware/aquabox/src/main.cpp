@@ -41,7 +41,8 @@
 #define SETOR2_DESLIGA      21          //Desliga alguma função - Setor 2
 #define TEMPO_INTERVALO     5           //Tempo de intervalo para iniciar o segundo setor
 #define CONFIGURACAO        300         //Comando para alterar a configuração de irrigação
-#define INFORMACOES         301         //Comando para o Aquabox enviar informações sobre o sistema
+#define STATUS              301         //Comando para o Aquabox enviar informações sobre o sistema
+#define RE_START            302         //Reinicializar todo o sistema
 
 /* Demais defines */
 #define TAMANHO_EEPROM 11
@@ -62,11 +63,11 @@ bool flagManutencao = true;     //Utilizar para o botão manutenção
 /* Estruturas */
     struct irrigacaoConf
     {
-        uint8_t modificado = 0;    //flag para indicar se estrutura foi alterada
-        uint8_t horaDeInicio = 17;
-        uint8_t minutoDeInicio = 0;
-        uint8_t duracao = 20;  //20 minutos
-        uint8_t diasDaSemana[7] = {1, 1, 1, 1, 1, 1, 1};
+        int modificado = 1;    //flag para indicar se estrutura foi alterada
+        int horaDeInicio = 17;
+        int minutoDeInicio = 0;
+        int duracao = 20;  //20 minutos
+        int diasDaSemana[7] = {1, 1, 1, 1, 1, 1, 1};
         int tempoDeDuracao = duracao*60;  //20 minutos      //Tempo utilizado no programa
         
     };
@@ -144,9 +145,12 @@ void setup()
     Serial.begin(115200);
 
     /* Inicialização da região de EEPROM */
-    EEPROM.begin(TAMANHO_EEPROM);
-    //escreverEEPROM();
-    lerEEPROM();
+    if(conf_Irriga.modificado == 1)
+    {
+        EEPROM.begin(TAMANHO_EEPROM);
+        //escreverEEPROM();
+        lerEEPROM();
+    }
     
     /*Executa a conexão com WiFi via WiFiManager*/
     WiFi.mode(WIFI_STA);
@@ -346,7 +350,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
 
         xSemaphoreTake(xConfig_irrigacao, portMAX_DELAY);
 
-        conf_Irriga.modificado = 1;
+        conf_Irriga.modificado = 0;
         conf_Irriga.horaDeInicio = doc["horaDeInicio"];
         conf_Irriga.minutoDeInicio = doc["minutoDeInicio"];
         conf_Irriga.duracao = doc["duracao"];
@@ -357,11 +361,32 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         conf_Irriga.diasDaSemana[4] = doc["qui"];
         conf_Irriga.diasDaSemana[5] = doc["sex"];
         conf_Irriga.diasDaSemana[6] = doc["sab"];
+        conf_Irriga.tempoDeDuracao = conf_Irriga.duracao * 60;
 
-         xSemaphoreGive(xConfig_irrigacao);
+        #ifdef DEBUG
+        Serial.println(conf_Irriga.modificado);
+        Serial.println(conf_Irriga.horaDeInicio);
+        Serial.println(conf_Irriga.minutoDeInicio);
+        Serial.println(conf_Irriga.duracao);
+        Serial.println(conf_Irriga.diasDaSemana[0]);
+        Serial.println(conf_Irriga.diasDaSemana[1]);
+        Serial.println(conf_Irriga.diasDaSemana[2]);
+        Serial.println(conf_Irriga.diasDaSemana[3]);
+        Serial.println(conf_Irriga.diasDaSemana[4]);
+        Serial.println(conf_Irriga.diasDaSemana[5]);
+        Serial.println(conf_Irriga.diasDaSemana[6]);
+        Serial.println(conf_Irriga.tempoDeDuracao);
+        #endif
+
+        escreverEEPROM();
+        lerEEPROM();
+
+        xSemaphoreGive(xConfig_irrigacao);
+
+        
     }
 
-    if(comando == INFORMACOES)
+    if(comando == STATUS)
     {
         /* Modelo do Json de configuração recebido */
         /*
@@ -377,6 +402,11 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
             erroFila();
             erro = true;
         }
+    }
+
+    if(comando == RE_START)
+    {
+        /* Comando para reinicializar o ESP32 */
     }
     
     msgRX = "";
@@ -401,26 +431,6 @@ void taskControle(void *params)
 
     while(true)
     {
-        if(conf_Irriga.modificado == 1)
-        {
-            conf_Irriga.modificado = 0;
-            escreverEEPROM();
-            #ifdef DEBUG
-                Serial.println("Configuração Alterada");
-                Serial.println(conf_Irriga.modificado);
-                Serial.println(conf_Irriga.horaDeInicio);
-                Serial.println(conf_Irriga.minutoDeInicio);
-                Serial.println(conf_Irriga.duracao);
-                Serial.println(conf_Irriga.diasDaSemana[0]);
-                Serial.println(conf_Irriga.diasDaSemana[1]);
-                Serial.println(conf_Irriga.diasDaSemana[2]);
-                Serial.println(conf_Irriga.diasDaSemana[3]);
-                Serial.println(conf_Irriga.diasDaSemana[4]);
-                Serial.println(conf_Irriga.diasDaSemana[5]);
-                Serial.println(conf_Irriga.diasDaSemana[6]);
-                Serial.println(conf_Irriga.tempoDeDuracao);
-            #endif
-        }
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Controle, (void *)&receive, portMAX_DELAY);
 
@@ -450,7 +460,7 @@ void taskControle(void *params)
             }
         }
 
-        if(receive == INFORMACOES)
+        if(receive == STATUS)
         {
             //TODO - Fazer rotina de envio das informações via MQTT
 
@@ -870,6 +880,7 @@ void escreverEEPROM()
     EEPROM.write(8,conf_Irriga.diasDaSemana[4]);
     EEPROM.write(9,conf_Irriga.diasDaSemana[5]);
     EEPROM.write(10,conf_Irriga.diasDaSemana[6]);
+
     EEPROM.commit();
 
     #ifdef DEBUG
@@ -880,7 +891,6 @@ void escreverEEPROM()
 
 void lerEEPROM()
 {
-  
     conf_Irriga.modificado = EEPROM.read(0);
     conf_Irriga.horaDeInicio = EEPROM.read(1);
     conf_Irriga.minutoDeInicio = EEPROM.read(2);
@@ -908,7 +918,6 @@ void lerEEPROM()
         Serial.println(conf_Irriga.diasDaSemana[6]);
         Serial.println(conf_Irriga.tempoDeDuracao);
     #endif
- 
 }
 
 void erroFila()
