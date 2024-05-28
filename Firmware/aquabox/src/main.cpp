@@ -59,11 +59,12 @@
 #define MANUTENCAO_DESLIGADA    203         //Avisar que o botão de manutenção esta desligado (fora do modo manutenção)
 #define DIA_DE_CHUVA            204         //Informar que choveu e não vai ligar a irrigação
 
-/* Códigos de erros */
+/* Códigos de erros e comandos aceitos */
 #define SEM_ERROS               500         //Sistema funcionando normal
 #define ERRO_DESCONHECIDO       501         //Erro não identificado
 #define ERRO_DE_VAZAO           502         //Erro na vazão da bomba
 #define ERRO_SENSOR_DE_VAZAO    503         //Erro no sensor de vazão. Se conseguir detectar o sensor de nível baixo
+#define COMANDO_ACEITO          504         //Comando enviado via mqtt foi aceito e processado      
 
 
 /* Demais defines */
@@ -110,6 +111,7 @@ bool flagManutencao = true;     //Utilizar para o botão manutenção
     const char ALIAS4[] = "statusSetor2";
     const char ALIAS5[] = "statusManutencao";
     const char ALIAS6[] = "statusErro";
+    const char ALIAS7[] = "statusDoComando";
 
     
 struct irrigacaoConf conf_Irriga;
@@ -479,9 +481,7 @@ void taskControle(void *params)
     int receive = 0;
     int result = 0;
     bool erro = true;
-
-    //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
-    JsonDocument json;
+    int statusDoComando = COMANDO_ACEITO;
 
     while(true)
     {
@@ -512,10 +512,31 @@ void taskControle(void *params)
                 erroFila();
                 erro = true;
             }
+            else
+            {
+                //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+                JsonDocument json;
+                //Atrela ao objeto "json" os dados definidos
+                json[ALIAS7] = statusDoComando;
+                //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+                size_t tamanho_payload = measureJson(json) + 1;
+
+                //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+                char payload[tamanho_payload];
+
+                //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+                serializeJson(json, payload, tamanho_payload);
+
+                //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+                publicarMensagem(topico_tx, payload);
+            }
+
         }
 
         if(receive == STATUS)
         {
+            //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+            JsonDocument json;
             //Atrela ao objeto "json" os dados definidos
             json[ALIAS1] = statusRetorno.statusBomba;
             json[ALIAS2] = statusRetorno.statusCaixa;
