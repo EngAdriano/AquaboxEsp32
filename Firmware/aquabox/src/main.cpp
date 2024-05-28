@@ -44,18 +44,40 @@
 #define STATUS              301         //Comando para o Aquabox enviar informações sobre o sistema
 #define RE_START            302         //Reinicializar todo o sistema
 
+/* Códigos de Retornos */
+#define BOMBA_LIGADA            112         //Avisar que a bom esta ligada
+#define BOMBA_DESLIGADA         113         //Avisar que a bomba esta desligada
+#define CAIXA_VAZIA             112         //Informar que a caixa d'água esta vazia
+#define CAIXA_CHEIA             113         //Informar que a caixa d'água esta cheia
+#define CAIXA_NORMAL            114         //Informar que a caixa d'água esta normal e em uso
+#define CAIXA_ENCHENDO          125         //Avisar que a caixa d'água está enchendo
+#define SETOR1_LIGADO           132         //Avisar que o setor 1 da irrigação está ligado
+#define SETOR1_DESLIGADO        133         //Avisar qye o setor 1 da irrigação está desligado
+#define SETOR2_LIGADO           142         //Avisar que o setor 1 da irrigação está ligado
+#define SETOR2_DESLIGADO        143         //Avisar qye o setor 1 da irrigação está desligado
+#define MANUTENCAO_LIGADA       202         //Avisar que o botão de manutenção esta ligado (modo manutenção)
+#define MANUTENCAO_DESLIGADA    203         //Avisar que o botão de manutenção esta desligado (fora do modo manutenção)
+#define DIA_DE_CHUVA            204         //Informar que choveu e não vai ligar a irrigação
+
+/* Códigos de erros */
+#define SEM_ERROS               500         //Sistema funcionando normal
+#define ERRO_DESCONHECIDO       501         //Erro não identificado
+#define ERRO_DE_VAZAO           502         //Erro na vazão da bomba
+#define ERRO_SENSOR_DE_VAZAO    503         //Erro no sensor de vazão. Se conseguir detectar o sensor de nível baixo
+
+
 /* Demais defines */
 #define TAMANHO_EEPROM 11
-#define MSG_BUFFER_SIZE 50
-char msg[MSG_BUFFER_SIZE];
+//#define MSG_BUFFER_SIZE 50
+//char msg[MSG_BUFFER_SIZE];
 String msgRX;
 
 const char* mqtt_server = "503847782e204ff99743e99127691fe7.s1.eu.hivemq.cloud";    //Host do broker
 const int porta_TLS = 8883;                                                         //Porta
 const char* mqtt_usuario = "Aquabox";                                               //Usuário
 const char* mqtt_senha = "Liukin@0804";                                             //Senha do usuário
-const char* topico_tx = "Aquabox/tx";                                                        //Tópico para transmitir dados
-const char* topico_rx = "Aquabox/rx";                                                        //Tópico para receber dados
+const char* topico_tx = "Aquabox/tx";                                               //Tópico para transmitir dados
+const char* topico_rx = "Aquabox/rx";                                               //Tópico para receber dados
 
 /* Variáveis globais */
 bool flagManutencao = true;     //Utilizar para o botão manutenção
@@ -72,7 +94,26 @@ bool flagManutencao = true;     //Utilizar para o botão manutenção
         
     };
 
+    struct statusAquabox
+    {
+        int statusBomba = BOMBA_DESLIGADA;
+        int statusCaixa = CAIXA_NORMAL;
+        int statusSetor1 = SETOR1_DESLIGADO;
+        int statusSetor2 = SETOR2_DESLIGADO;
+        int statusManutencao = MANUTENCAO_DESLIGADA;
+        int statusErro = SEM_ERROS;
+    };
+
+    const char ALIAS1[] = "statusBomba";
+    const char ALIAS2[] = "statusCaixa";
+    const char ALIAS3[] = "statusSetor1";
+    const char ALIAS4[] = "statusSetor2";
+    const char ALIAS5[] = "statusManutencao";
+    const char ALIAS6[] = "statusErro";
+
+    
 struct irrigacaoConf conf_Irriga;
+struct statusAquabox statusRetorno;
 
 /* Protótipo das funções e tasks */
 void taskMqtt(void *params);
@@ -92,7 +133,7 @@ void lerEEPROM();
 void erroFila();
 bool conecteMQTT();
 void callbackMqtt(char *topico, byte *payload, unsigned int length);
-void publicarMensagem(const char* topico, String payload , boolean retencao);
+void publicarMensagem(const char* topico, String payload);
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Controle;
@@ -331,7 +372,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
 
     if(comando == CONFIGURACAO)
     {
-        /* Modelo do Json de configuração recebido - Exemplo */
+        /* Modelo do Json de configuração - Exemplo */
         /*
             {
                 "comando": "300",
@@ -421,9 +462,9 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
     msgRX = "";
 }
 
-void publicarMensagem(const char* topico, String payload , boolean retencao)
+void publicarMensagem(const char* topico, String payload)
 {
-    if (cliente_MQTT.publish(topico, payload.c_str(), true))
+    if (cliente_MQTT.publish(topico, payload.c_str()))
     {
         #ifdef DEBUG
         Serial.println("Mensagem Publicada ["+String(topico)+"]: "+ payload);
@@ -471,11 +512,32 @@ void taskControle(void *params)
 
         if(receive == STATUS)
         {
-            //TODO - Fazer rotina de envio das informações via MQTT
+            //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+            JsonDocument json;
+        
+            //Atrela ao objeto "json" os dados definidos
+            json[ALIAS1] = statusRetorno.statusBomba;
+            json[ALIAS2] = statusRetorno.statusCaixa;
+            json[ALIAS3] = statusRetorno.statusSetor1;
+            json[ALIAS4] = statusRetorno.statusSetor2;
+            json[ALIAS5] = statusRetorno.statusManutencao;
+            json[ALIAS6] = statusRetorno.statusErro;
+
+            //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+            size_t tamanho_payload = measureJson(json) + 1;
+
+            //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+            char payload[tamanho_payload];
+
+            //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+            serializeJson(json, payload, tamanho_payload);
+
+            //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+            publicarMensagem(topico_tx, payload);
 
             #ifdef DEBUG
-                Serial.print("Comando para envio de informações recebido: ");
-                Serial.println(receive);
+                Serial.print("Json enviado para topico: topico/tx ");
+                Serial.println(payload);
             #endif
         }
     }
