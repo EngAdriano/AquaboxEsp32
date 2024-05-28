@@ -47,9 +47,9 @@
 /* Códigos de Retornos */
 #define BOMBA_LIGADA            112         //Avisar que a bom esta ligada
 #define BOMBA_DESLIGADA         113         //Avisar que a bomba esta desligada
-#define CAIXA_VAZIA             112         //Informar que a caixa d'água esta vazia
-#define CAIXA_CHEIA             113         //Informar que a caixa d'água esta cheia
-#define CAIXA_NORMAL            114         //Informar que a caixa d'água esta normal e em uso
+#define CAIXA_VAZIA             122         //Informar que a caixa d'água esta vazia
+#define CAIXA_CHEIA             123         //Informar que a caixa d'água esta cheia
+#define CAIXA_NORMAL            124         //Informar que a caixa d'água esta normal e em uso
 #define CAIXA_ENCHENDO          125         //Avisar que a caixa d'água está enchendo
 #define SETOR1_LIGADO           132         //Avisar que o setor 1 da irrigação está ligado
 #define SETOR1_DESLIGADO        133         //Avisar qye o setor 1 da irrigação está desligado
@@ -139,7 +139,7 @@ void publicarMensagem(const char* topico, String payload);
 QueueHandle_t xQueue_Reles, xQueue_Controle;
 
 /* semaforos utilizados */
-SemaphoreHandle_t xConfig_irrigacao;
+SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno;
 
 /* Objetos */
 WiFiClientSecure espCliente;                //Estância o objeto cliente
@@ -218,6 +218,7 @@ void setup()
 
     /* Criação dos semaforos */
     xConfig_irrigacao = xSemaphoreCreateMutex();
+    xStatusRetorno = xSemaphoreCreateMutex();
 
     //Task de monitoramento e leitura dos sensores de nível
     xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 4, NULL);
@@ -479,6 +480,9 @@ void taskControle(void *params)
     int result = 0;
     bool erro = true;
 
+    //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+    JsonDocument json;
+
     while(true)
     {
         /* Espera até algo ser recebido na queue */
@@ -512,9 +516,6 @@ void taskControle(void *params)
 
         if(receive == STATUS)
         {
-            //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
-            JsonDocument json;
-        
             //Atrela ao objeto "json" os dados definidos
             json[ALIAS1] = statusRetorno.statusBomba;
             json[ALIAS2] = statusRetorno.statusCaixa;
@@ -639,6 +640,9 @@ void nivelBaixoPressionado()
     int result = 0;
     int comando = LIGA_CAIXA;
     bool erro = true;
+    xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+    statusRetorno.statusCaixa = CAIXA_VAZIA;
+    xSemaphoreGive(xStatusRetorno);
 
     result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
     erro = dadoNaFila(result);
@@ -667,11 +671,15 @@ void nivelAltoPressionado()
 void nivelBaixoLiberado()
 {
     //Tratar depois para detectar erro no sensor
+    
 }
 
 void nivelAltoLiberado()
 {
     //Tratar depois para detectar erro no sensor
+    xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+    statusRetorno.statusCaixa = CAIXA_NORMAL;
+    xSemaphoreGive(xStatusRetorno);
 }
 
 bool dadoNaFila(int result)
@@ -711,31 +719,49 @@ void taskReles(void *params)
             receive = 0;
             break;
 
-        case 110:               //desliga somente a bomba               
+        case 110:               //desliga somente a bomba
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            xSemaphoreGive(xStatusRetorno);            
             Reles.off(0);
             receive = 0;
             break;
 
-        case 111:               //Liga somente a bomba                
+        case 111:               //Liga somente a bomba
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusBomba = BOMBA_LIGADA;
+            xSemaphoreGive(xStatusRetorno);                
             Reles.on(0);
             receive = 0;
             break;
 
-        case 120:               //desliga o encher da caixa d'água                                            
+        case 120:               //desliga o encher da caixa d'água
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusCaixa = CAIXA_CHEIA;
+            statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            xSemaphoreGive(xStatusRetorno);                                            
             Reles.off(0);
             vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
             Reles.off(1);
             receive = 0;
             break;
 
-        case 121:               //liga o encher da caixa d'água                               
+        case 121:               //liga o encher da caixa d'água
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusCaixa = CAIXA_ENCHENDO;
+            statusRetorno.statusBomba = BOMBA_LIGADA;
+            xSemaphoreGive(xStatusRetorno);                               
             Reles.on(1);
             vTaskDelay( 3000 / portTICK_PERIOD_MS );
             Reles.on(0);
             receive = 0;
             break;
 
-        case 130:               //desliga a irrigação do setor 1                              
+        case 130:               //desliga a irrigação do setor 1
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusSetor1 = SETOR1_DESLIGADO;
+            statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            xSemaphoreGive(xStatusRetorno);                              
             Reles.off(0);
             vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
             Reles.off(2);
@@ -743,6 +769,10 @@ void taskReles(void *params)
             break;
 
         case 131:               //liga a irrigação do setor 1
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusSetor1 = SETOR1_LIGADO;
+            statusRetorno.statusBomba = BOMBA_LIGADA;
+            xSemaphoreGive(xStatusRetorno);
             Reles.on(2);
             vTaskDelay( 3000 / portTICK_PERIOD_MS );
             Reles.on(0);
@@ -750,6 +780,10 @@ void taskReles(void *params)
             break;
 
         case 140:               //desliga a irrigação do setor 2
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusSetor2 = SETOR2_DESLIGADO;
+            statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            xSemaphoreGive(xStatusRetorno);
             Reles.off(0);
             vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
             Reles.off(3);
@@ -757,6 +791,10 @@ void taskReles(void *params)
             break;
 
         case 141:               //liga a irrigação do setor 2
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusSetor2 = SETOR2_LIGADO;
+            statusRetorno.statusBomba = BOMBA_LIGADA;
+            xSemaphoreGive(xStatusRetorno);
             Reles.on(3);
             vTaskDelay( 3000 / portTICK_PERIOD_MS );
             Reles.on(0);
