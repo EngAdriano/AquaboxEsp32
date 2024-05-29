@@ -22,6 +22,7 @@
 #define RELE_CAIXA          15
 #define RELE_SETOR_1        5
 #define RELE_SETOR_2        4
+#define BEEP                18
 
 /* Comandos */
 #define DESLIGA_RELES       100         //Desliga todos os relés  
@@ -64,7 +65,11 @@
 #define ERRO_DESCONHECIDO       501         //Erro não identificado
 #define ERRO_DE_VAZAO           502         //Erro na vazão da bomba
 #define ERRO_SENSOR_DE_VAZAO    503         //Erro no sensor de vazão. Se conseguir detectar o sensor de nível baixo
-#define COMANDO_RECEBIDO        504         //Comando enviado via mqtt foi aceito e processado      
+#define COMANDO_RECEBIDO        504         //Comando enviado via mqtt foi aceito e processado
+
+/* Outras configurações */
+#define TEMPO_BEEP_RAPIDO       200         //Tempo em milesegundos
+#define INTERVALO_BEEPS         100         //Tempo em milesegundos
 
 
 /* Demais defines */
@@ -141,6 +146,8 @@ void erroFila();
 bool conecteMQTT();
 void callbackMqtt(char *topico, byte *payload, unsigned int length);
 void publicarMensagem(const char* topico, String payload);
+void beepSinal(int duracao);     //Duracao em milesegundos
+void sequenciaBeeps(int beeps, int duracao, int intervalo);  //Tempos em milisegundos
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Controle;
@@ -192,6 +199,12 @@ void setup()
     /* Inicializa serial (baudrate 115200) */
     Serial.begin(115200);
 
+    /* Habilitar pino do BEEP */
+    pinMode(BEEP, OUTPUT);
+
+    /* Sinal sonoro */
+    sequenciaBeeps(1, TEMPO_BEEP_RAPIDO, INTERVALO_BEEPS);
+
     /* Inicialização da região de EEPROM */
     if(conf_Irriga.modificado == 1)
     {
@@ -242,6 +255,7 @@ void setup()
 
     //Task de comunicação MQTT
     xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
+
 }
 
 void loop() 
@@ -327,6 +341,9 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
     int result = 0;
     bool erro = true;
     int statusDoComando = COMANDO_RECEBIDO;
+
+    /* Sinal sonoro */
+    sequenciaBeeps(1, TEMPO_BEEP_RAPIDO, INTERVALO_BEEPS);
 
     #ifdef DEBUG
         //Serial.print("Mensagem recebida do tópico: ");
@@ -451,6 +468,8 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
 
         /* Gravar na EEPROM */
         escreverEEPROM();
+        /* Sinal sonoro */
+        sequenciaBeeps(1, TEMPO_BEEP_RAPIDO, INTERVALO_BEEPS);
         lerEEPROM();
         comando = 0;
         xSemaphoreGive(xConfig_irrigacao);
@@ -765,7 +784,7 @@ void taskReles(void *params)
             xSemaphoreGive(xStatusRetorno);                
             Reles.on(0);
             receive = 0;
-
+            beepSinal(TEMPO_BEEP_RAPIDO);
             break;
 
         case 120:               //desliga o encher da caixa d'água
@@ -1098,3 +1117,18 @@ void erroFila()
     #endif
 }
 
+void beepSinal(int duracao)     //Duracao em milesegundos
+{
+    digitalWrite(BEEP, HIGH);
+    vTaskDelay( duracao / portTICK_PERIOD_MS );
+    digitalWrite(BEEP, LOW);
+}
+
+void sequenciaBeeps(int beeps, int duracao, int intervalo)
+{
+    for(int i = 0; i < beeps; i++)
+    {
+        beepSinal(duracao);
+        vTaskDelay( intervalo / portTICK_PERIOD_MS );
+    }
+}
