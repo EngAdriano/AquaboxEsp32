@@ -64,14 +64,19 @@
 #define ERRO_DESCONHECIDO       501         //Erro não identificado
 #define ERRO_DE_VAZAO           502         //Erro na vazão da bomba
 #define ERRO_SENSOR_DE_VAZAO    503         //Erro no sensor de vazão. Se conseguir detectar o sensor de nível baixo
-#define COMANDO_ACEITO          504         //Comando enviado via mqtt foi aceito e processado      
+#define COMANDO_RECEBIDO        504         //Comando enviado via mqtt foi aceito e processado      
 
 
 /* Demais defines */
 #define TAMANHO_EEPROM 11
 //#define MSG_BUFFER_SIZE 50
 //char msg[MSG_BUFFER_SIZE];
+
+/* Variáveis globais */
 String msgRX;
+//bool prontoParaEnviar = true;
+bool prontoParaReceber = true;
+
 
 const char* mqtt_server = "503847782e204ff99743e99127691fe7.s1.eu.hivemq.cloud";    //Host do broker
 const int porta_TLS = 8883;                                                         //Porta
@@ -141,7 +146,7 @@ void publicarMensagem(const char* topico, String payload);
 QueueHandle_t xQueue_Reles, xQueue_Controle;
 
 /* semaforos utilizados */
-SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno;
+SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando;
 
 /* Objetos */
 WiFiClientSecure espCliente;                //Estância o objeto cliente
@@ -221,6 +226,7 @@ void setup()
     /* Criação dos semaforos */
     xConfig_irrigacao = xSemaphoreCreateMutex();
     xStatusRetorno = xSemaphoreCreateMutex();
+    xEnviaComando = xSemaphoreCreateMutex();
 
     //Task de monitoramento e leitura dos sensores de nível
     xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 4, NULL);
@@ -232,7 +238,7 @@ void setup()
     xTaskCreate(taskReles, "Reles", 1024, NULL, 5,NULL);
 
     //Task de controle
-    xTaskCreate(taskControle, "Controle", 2048, NULL, 5, NULL);
+    xTaskCreate(taskControle, "Controle", 4096, NULL, 5, NULL);
 
     //Task de comunicação MQTT
     xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
@@ -320,6 +326,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
 {
     int result = 0;
     bool erro = true;
+    int statusDoComando = COMANDO_RECEBIDO;
 
     #ifdef DEBUG
         //Serial.print("Mensagem recebida do tópico: ");
@@ -353,7 +360,9 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
     return;
     }
 
+    xSemaphoreTake(xEnviaComando, portMAX_DELAY);
     int comando = doc["comando"];
+    xSemaphoreGive(xEnviaComando);
 
     if(comando >= DESLIGA_RELES && comando <= LIGA_SETOR2 )
     {
@@ -370,6 +379,24 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         {
             erroFila();
             erro = true;
+        }
+        else
+        {
+            //Cria o objeto dinâmico "json" com tamanho "6" para a biblioteca
+            JsonDocument json;
+            //Atrela ao objeto "json" os dados definidos
+            json[ALIAS7] = statusDoComando;
+            //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+            size_t tamanho_payload = measureJson(json) + 1;
+
+            //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+            char payload[tamanho_payload];
+
+            //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+            serializeJson(json, payload, tamanho_payload);
+
+            //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+            publicarMensagem(topico_tx, payload);
         }
     }
 
@@ -425,9 +452,8 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         /* Gravar na EEPROM */
         escreverEEPROM();
         lerEEPROM();
-
-        xSemaphoreGive(xConfig_irrigacao);
         comando = 0;
+        xSemaphoreGive(xConfig_irrigacao);
     }
 
     if(comando == STATUS)
@@ -446,7 +472,10 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
             erroFila();
             erro = true;
         }
+        
+        xSemaphoreTake(xEnviaComando, portMAX_DELAY);
         comando = 0;
+        xSemaphoreGive(xEnviaComando);
     }
 
     if(comando == RE_START)
@@ -459,7 +488,6 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         */
         /* Comando para reinicializar o ESP32 */
         esp_restart();
-        comando = 0;
     }
     
     msgRX = "";
@@ -481,7 +509,6 @@ void taskControle(void *params)
     int receive = 0;
     int result = 0;
     bool erro = true;
-    int statusDoComando = COMANDO_ACEITO;
 
     while(true)
     {
@@ -512,25 +539,6 @@ void taskControle(void *params)
                 erroFila();
                 erro = true;
             }
-            else
-            {
-                //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
-                JsonDocument json;
-                //Atrela ao objeto "json" os dados definidos
-                json[ALIAS7] = statusDoComando;
-                //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
-                size_t tamanho_payload = measureJson(json) + 1;
-
-                //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
-                char payload[tamanho_payload];
-
-                //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
-                serializeJson(json, payload, tamanho_payload);
-
-                //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
-            }
-
         }
 
         if(receive == STATUS)
@@ -743,23 +751,28 @@ void taskReles(void *params)
         case 110:               //desliga somente a bomba
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            prontoParaReceber = true;
             xSemaphoreGive(xStatusRetorno);            
             Reles.off(0);
             receive = 0;
+            prontoParaReceber = true;
             break;
 
         case 111:               //Liga somente a bomba
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusBomba = BOMBA_LIGADA;
+            prontoParaReceber = false;
             xSemaphoreGive(xStatusRetorno);                
             Reles.on(0);
             receive = 0;
+
             break;
 
         case 120:               //desliga o encher da caixa d'água
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusCaixa = CAIXA_CHEIA;
             statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            prontoParaReceber = true;
             xSemaphoreGive(xStatusRetorno);                                            
             Reles.off(0);
             vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
@@ -771,6 +784,7 @@ void taskReles(void *params)
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusCaixa = CAIXA_ENCHENDO;
             statusRetorno.statusBomba = BOMBA_LIGADA;
+            prontoParaReceber = false;
             xSemaphoreGive(xStatusRetorno);                               
             Reles.on(1);
             vTaskDelay( 3000 / portTICK_PERIOD_MS );
@@ -782,6 +796,7 @@ void taskReles(void *params)
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusSetor1 = SETOR1_DESLIGADO;
             statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            prontoParaReceber = true;
             xSemaphoreGive(xStatusRetorno);                              
             Reles.off(0);
             vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
@@ -793,6 +808,7 @@ void taskReles(void *params)
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusSetor1 = SETOR1_LIGADO;
             statusRetorno.statusBomba = BOMBA_LIGADA;
+            prontoParaReceber = false;
             xSemaphoreGive(xStatusRetorno);
             Reles.on(2);
             vTaskDelay( 3000 / portTICK_PERIOD_MS );
@@ -804,6 +820,7 @@ void taskReles(void *params)
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusSetor2 = SETOR2_DESLIGADO;
             statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            prontoParaReceber = true;
             xSemaphoreGive(xStatusRetorno);
             Reles.off(0);
             vTaskDelay( 3000 / portTICK_PERIOD_MS ); 
@@ -815,6 +832,7 @@ void taskReles(void *params)
             xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
             statusRetorno.statusSetor2 = SETOR2_LIGADO;
             statusRetorno.statusBomba = BOMBA_LIGADA;
+            prontoParaReceber = false;
             xSemaphoreGive(xStatusRetorno);
             Reles.on(3);
             vTaskDelay( 3000 / portTICK_PERIOD_MS );
@@ -847,10 +865,11 @@ void taskRelogio(void *params)
     int setorComando = 0;
     int tempoDecorrido = 0;
     bool iniciarContagem = false;
-    byte enviaLigaSetor1 = 1;
+    byte enviaLigaSetor1 = 0;
     byte enviaDesligaSetor1 = 0;
     byte enviaLigaSetor2 = 0;
     byte enviaDesligaSetor2 = 0;
+    byte naoRepeteComando = 1;
 
     /* Variáveis para o relógio*/
     const char* ntpServer = "pool.ntp.org";
@@ -879,12 +898,19 @@ void taskRelogio(void *params)
                 tempoDecorrido++;
             }
             
-            xSemaphoreTake(xConfig_irrigacao, portMAX_DELAY);
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
 
             if(conf_Irriga.diasDaSemana[diaDaSemana] == 1)
             {
-                if((conf_Irriga.horaDeInicio == timeinfo.tm_hour) && (conf_Irriga.minutoDeInicio == timeinfo.tm_min) && (enviaLigaSetor1 == 1))
+                if((conf_Irriga.horaDeInicio == timeinfo.tm_hour) && (conf_Irriga.minutoDeInicio == timeinfo.tm_min) && (naoRepeteComando == 1))
                 {
+                    enviaLigaSetor1 = 1;
+                    naoRepeteComando = 0;
+                }
+
+                if((enviaLigaSetor1 == 1) && (prontoParaReceber == true))
+                {
+                    enviaLigaSetor1 = 0;
                     setorComando = SETOR1_LIGA;
                     iniciarContagem = true;
                     tempoDecorrido = 0;
@@ -918,7 +944,7 @@ void taskRelogio(void *params)
                 #endif
             }
 
-            xSemaphoreGive(xConfig_irrigacao);
+            xSemaphoreGive(xEnviaComando);
         }
 
         switch (setorComando)
@@ -933,10 +959,13 @@ void taskRelogio(void *params)
                 erroFila();
                 erro = true;
             }
+
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             comando = 0;
             setorComando = 0;
             enviaLigaSetor1 = 0;
             enviaDesligaSetor1 = 1;
+            xSemaphoreGive(xEnviaComando);
             break;
 
         case SETOR1_DESLIGA:
@@ -949,10 +978,13 @@ void taskRelogio(void *params)
                 erroFila();
                 erro = true;
             }
+
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             comando = 0;
             setorComando = 0;
             enviaDesligaSetor1 = 0;
             enviaLigaSetor2 = 1;
+            xSemaphoreGive(xEnviaComando);
             break;
 
         case SETOR2_LIGA:
@@ -965,10 +997,13 @@ void taskRelogio(void *params)
                 erroFila();
                 erro = true;
             }
+
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             comando = 0;
             setorComando = 0;
             enviaLigaSetor2 = 0;
             enviaDesligaSetor2 = 1;
+            xSemaphoreGive(xEnviaComando);
             break;
 
         case SETOR2_DESLIGA:
@@ -981,15 +1016,21 @@ void taskRelogio(void *params)
                 erroFila();
                 erro = true;
             }
+
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             comando = 0;
             setorComando = 0;
             enviaDesligaSetor2 = 0;
-            enviaLigaSetor1 = 1;
+            enviaLigaSetor1 = 0;
+            naoRepeteComando = 1;
+            xSemaphoreGive(xEnviaComando);
             break;
         
         default:
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             comando = 0;
             setorComando = 0;
+            xSemaphoreGive(xEnviaComando);
             break;
         }
 
