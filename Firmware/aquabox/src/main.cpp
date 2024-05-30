@@ -15,14 +15,14 @@
 
 /* Pinos GPIOs */
 #define BOMBA               36
-#define MANUTENCAO          39
+#define SENSOR_DE_FLUXO     39
 #define SENSOR_NIVEL_BAIXO  27
 #define SENSOR_NIVEL_ALTO   14
 #define RELE_BOMBA          2
 #define RELE_CAIXA          15
 #define RELE_SETOR_1        5
 #define RELE_SETOR_2        4
-#define BEEP                18
+#define BEEP                18 
 
 /* Comandos */
 #define DESLIGA_RELES       100         //Desliga todos os relés  
@@ -82,6 +82,10 @@ String msgRX;
 //bool prontoParaEnviar = true;
 bool prontoParaReceber = true;
 
+// Variáveis para contagem de pulsos
+volatile int contaPulso = 0;
+int ultimoContador = 0;
+
 
 const char* mqtt_server = "503847782e204ff99743e99127691fe7.s1.eu.hivemq.cloud";    //Host do broker
 const int porta_TLS = 8883;                                                         //Porta
@@ -133,6 +137,7 @@ void taskControle(void *params);
 void taskSensores(void *params);
 void taskReles(void *params);
 void taskRelogio(void *params);
+void taskSensorDeFluxo(void *params);
 void btnBombaPressionado();
 void btnBombaLiberado();
 void nivelBaixoPressionado();
@@ -148,6 +153,8 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length);
 void publicarMensagem(const char* topico, String payload);
 void beepSinal(int duracao);     //Duracao em milesegundos
 void sequenciaBeeps(int beeps, int duracao, int intervalo);  //Tempos em milisegundos
+void leituraDePulsos();
+
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Controle;
@@ -248,13 +255,16 @@ void setup()
     xTaskCreate(taskSensores, "Sensores", 2048, NULL, 5, NULL); 
 
     //Task de acionamento dos relés
-    xTaskCreate(taskReles, "Reles", 1024, NULL, 5,NULL);
+    xTaskCreate(taskReles, "Reles", 2048, NULL, 5,NULL);
 
     //Task de controle
     xTaskCreate(taskControle, "Controle", 4096, NULL, 5, NULL);
 
     //Task de comunicação MQTT
     xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
+
+    //Task contador de pulsos do sensor de fluxo
+    xTaskCreate(taskSensorDeFluxo, "fluxo", 2048, NULL, 5, NULL);
 
 }
 
@@ -592,13 +602,40 @@ void taskControle(void *params)
     }
 }
 
+void taskSensorDeFluxo(void *params)
+{
+    EventoSensores sensorDeFluxo(SENSOR_DE_FLUXO, LOW);
+
+    sensorDeFluxo.setPressionadoCallback(&leituraDePulsos);
+
+    while(true)
+    {
+        sensorDeFluxo.process();
+        float vazaoAgua = contaPulso / 7.5; // 7.5 pulsos por litro
+
+        #ifdef DEBUG
+            // Exiba a quantidade total de pulsos
+                Serial.print("Total de pulsos: ");
+                Serial.print(contaPulso);
+                Serial.print(" ----- ");
+                Serial.print("Vazão: ");
+                Serial.println(vazaoAgua);
+        #endif
+    }
+}
+
+void leituraDePulsos()
+{
+    contaPulso++;
+}
+
 void taskSensores(void *params)
 {
     /* Estânciar objetos*/
     EventoSensores nivelBaixo(SENSOR_NIVEL_BAIXO, LOW);
     EventoSensores nivelAlto(SENSOR_NIVEL_ALTO, LOW);
     EventoSensores btnBomba(BOMBA, LOW);
-    EventoSensores btnManutencao(MANUTENCAO, LOW);
+    
 
     nivelBaixo.setPressionadoCallback(&nivelBaixoPressionado);
     nivelAlto.setPressionadoCallback(&nivelAltoPressionado);
