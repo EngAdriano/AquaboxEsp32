@@ -83,9 +83,7 @@ String msgRX;
 bool prontoParaReceber = true;
 
 // Variáveis para contagem de pulsos
-volatile int contaPulso = 0;
-int ultimoContador = 0;
-
+volatile int contaPulso = 0;        //Variável para a quantidade de pulsos
 
 const char* mqtt_server = "503847782e204ff99743e99127691fe7.s1.eu.hivemq.cloud";    //Host do broker
 const int porta_TLS = 8883;                                                         //Porta
@@ -138,6 +136,7 @@ void taskSensores(void *params);
 void taskReles(void *params);
 void taskRelogio(void *params);
 void taskSensorDeFluxo(void *params);
+void taskcalculaVazao(void *params);
 void btnBombaPressionado();
 void btnBombaLiberado();
 void nivelBaixoPressionado();
@@ -160,7 +159,7 @@ void leituraDePulsos();
 QueueHandle_t xQueue_Reles, xQueue_Controle;
 
 /* semaforos utilizados */
-SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando;
+SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando, xInterrupcaoVazao;
 
 /* Objetos */
 WiFiClientSecure espCliente;                //Estância o objeto cliente
@@ -247,6 +246,7 @@ void setup()
     xConfig_irrigacao = xSemaphoreCreateMutex();
     xStatusRetorno = xSemaphoreCreateMutex();
     xEnviaComando = xSemaphoreCreateMutex();
+    xInterrupcaoVazao = xSemaphoreCreateMutex();
 
     //Task de monitoramento e leitura dos sensores de nível
     xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 4, NULL);
@@ -258,14 +258,16 @@ void setup()
     xTaskCreate(taskReles, "Reles", 2048, NULL, 5,NULL);
 
     //Task de controle
-    xTaskCreate(taskControle, "Controle", 4096, NULL, 5, NULL);
+    xTaskCreate(taskControle, "Controle", 2048, NULL, 5, NULL); 
 
     //Task de comunicação MQTT
-    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
+    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);     
 
     //Task contador de pulsos do sensor de fluxo
     xTaskCreate(taskSensorDeFluxo, "fluxo", 2048, NULL, 5, NULL);
 
+    //Task para calcular vazão
+    xTaskCreate(taskcalculaVazao, "vazao", 1024, NULL, 5, NULL);
 }
 
 void loop() 
@@ -611,22 +613,65 @@ void taskSensorDeFluxo(void *params)
     while(true)
     {
         sensorDeFluxo.process();
-        float vazaoAgua = contaPulso / 7.5; // 7.5 pulsos por litro
-
+        /*
         #ifdef DEBUG
-            // Exiba a quantidade total de pulsos
-                Serial.print("Total de pulsos: ");
-                Serial.print(contaPulso);
-                Serial.print(" ----- ");
-                Serial.print("Vazão: ");
-                Serial.println(vazaoAgua);
+        Serial.print("Contagem de pulsos: ");
+        Serial.println(contaPulso);
         #endif
+        */
     }
 }
 
 void leituraDePulsos()
 {
+    xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
     contaPulso++;
+    xSemaphoreGive(xInterrupcaoVazao);
+}
+
+void taskcalculaVazao(void *params)
+{
+    double flowRate;
+    int temPulso = 0;
+
+    while(true)
+   {
+    xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
+    contaPulso = 0;
+    xSemaphoreGive(xInterrupcaoVazao);
+
+    vTaskDelay( 1000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+
+    // Calcula a vazão em L/min
+    xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
+    flowRate = contaPulso * 2.25 ; // 7.5 pulsos por litro (ajuste conforme o sensor)
+    xSemaphoreGive(xInterrupcaoVazao);
+    flowRate = flowRate * 60;
+    flowRate = flowRate / 1000;
+    
+    temPulso = temPulso + contaPulso;
+
+    Serial.println("primeira medida");
+    Serial.print("Vazão: ");
+    Serial.print(flowRate);
+    Serial.println(" L/min");
+
+    Serial.println();
+    Serial.println("Segunda medida");
+    float vazaoAgua = contaPulso / 7.5; // 7.5 pulsos por litro (ajuste conforme o sensor)
+    Serial.print("Vazão: ");
+    Serial.print(vazaoAgua);
+    Serial.println(" L/min");
+
+    // Calcula o volume total em litros
+    float volumeTotal = (temPulso / 7.5) * (millis() / 60000.0); // Tempo em minutos
+    Serial.print("Volume Total: ");
+    Serial.print(volumeTotal);
+    Serial.println(" litros");
+
+
+
+   }
 }
 
 void taskSensores(void *params)
