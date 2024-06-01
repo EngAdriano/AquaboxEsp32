@@ -1,0 +1,168 @@
+
+/* Códigos de Retornos */
+#define BOMBA_LIGADA            112         //Avisar que a bom esta ligada
+#define BOMBA_DESLIGADA         113         //Avisar que a bomba esta desligada
+#define CAIXA_VAZIA             122         //Informar que a caixa d'água esta vazia
+#define CAIXA_CHEIA             123         //Informar que a caixa d'água esta cheia
+#define CAIXA_NORMAL            124         //Informar que a caixa d'água esta normal e em uso
+#define CAIXA_ENCHENDO          125         //Avisar que a caixa d'água está enchendo
+#define SETOR1_LIGADO           132         //Avisar que o setor 1 da irrigação está ligado
+#define SETOR1_DESLIGADO        133         //Avisar qye o setor 1 da irrigação está desligado
+#define SETOR2_LIGADO           142         //Avisar que o setor 1 da irrigação está ligado
+#define SETOR2_DESLIGADO        143         //Avisar qye o setor 1 da irrigação está desligado
+#define MANUTENCAO_LIGADA       202         //Avisar que o botão de manutenção esta ligado (modo manutenção)
+#define MANUTENCAO_DESLIGADA    203         //Avisar que o botão de manutenção esta desligado (fora do modo manutenção)
+#define DIA_DE_CHUVA            204         //Informar que choveu e não vai ligar a irrigação
+
+/* Códigos de erros */
+#define SEM_ERROS               500         //Sistema funcionando normal
+#define ERRO_DESCONHECIDO       501         //Erro não identificado
+#define ERRO_DE_VAZAO           502         //Erro na vazão da bomba
+#define ERRO_SENSOR_DE_VAZAO    503         //Erro no sensor de vazão. Se conseguir detectar o sensor de nível baixo
+
+====================================================================================================================================
+
+xSemaphoreTake(xConfig_irrigacao, portMAX_DELAY);
+
+xSemaphoreGive(xConfig_irrigacao);
+
+
+-------------------------------------------------------------------------------------------------------------------------------------
+
+xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+
+xSemaphoreGive(xEnviaComando);
+
+--------------------------------------------------------------------------------------------------------------------------------------
+
+doeamordequalidade@gmail.com PIX para doação para cachorrinha atropelada
+==================================================================================================================================
+Sensor de fluxo que compramos
+
+É turbina tipo água fluxo medição sensor. Quando a água flui através dele, ele irá emitir uma série de pulsos. 
+Ao contar os pulsos da saída do sensor, você pode calcular facilmente o fluxo de água. Cada pulso é aproximadamente 3,33 mililitros.
+Temos como exemplo esboço que pode ser usado para testar rapidamente o sensor para Arduino.
+E calculará o fluxo aproximado de água em litros/hora.
+O sinal de pulso é uma onda quadrada simples, então é muito fácil registrar e converter em litros por minuto usando a seguinte fórmula.
+Frequência do pulso (Hz) = 6,6 * fluxo em L/min.
+Características:
+Faixa de fluxo de medição: 1 ~ 30 L/min
+Tensão de funcionamento: 4.7 ~ 15 VDC
+Corrente de trabalho: ≤ 10 mA (DC 5V)
+-Umidade de trabalho: 35% ~ 90% RH (sem geada)
+Pressão de trabalho: < 1.75Mpa
+-Temperatura de trabalho: -25 ~ + 80 ℃
+-Rosca externa: G3/4 (3/4 polegadas)
+-Conector de saída: 2.54MM-3P
+-Saída leva: amarelo (DADOS), vermelho (VCC), preto (GND)
+-Comprimento do chumbo: 30cm
+-Aplicação: aquecedores de água, máquinas do cartão de crédito, água vending machine, água fluem medida dispositivo.
+
+
+
+=====================================================================================================================================
+contador de pulsos
+
+#include <Arduino_FreeRTOS.h>
+
+// Pino do sensor de fluxo de água
+const int PINO_SENSOR = 2;
+
+// Variáveis para contagem de pulsos
+volatile int contaPulso = 0;
+int ultimoContador = 0;
+
+// Função da tarefa para ler os pulsos
+void tarefaLeituraPulsos(void *pvParameters) {
+  (void) pvParameters;
+
+  pinMode(PINO_SENSOR, INPUT_PULLUP);
+
+  while (1) {
+    int pulsosLidos = digitalRead(PINO_SENSOR);
+    if (pulsosLidos != ultimoContador) {
+      contaPulso++;
+      ultimoContador = pulsosLidos;
+    }
+
+    // Exiba a quantidade total de pulsos
+    Serial.print("Total de pulsos: ");
+    Serial.println(contaPulso);
+
+    vTaskDelay(pdMS_TO_TICKS(1000)); // Aguarde 1 segundo
+  }
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  // Crie a tarefa para leitura dos pulsos
+  xTaskCreate(tarefaLeituraPulsos, "LeituraPulsos", 1024, NULL, 1, NULL);
+}
+
+void loop() {
+  // O loop principal não faz nada neste exemplo
+}
+
+
+===========================================================================================
+
+const int INTERRUPCAO_SENSOR = 0; // Interrupção = 0 equivale ao pino digital 2
+const int PINO_SENSOR = 2;
+volatile int contaPulso = 0; // Variável para a quantidade de pulsos
+
+void setup() {
+  pinMode(PINO_SENSOR, INPUT);
+  attachInterrupt(INTERRUPCAO_SENSOR, contadorPulsos, RISING);
+  Serial.begin(9600);
+}
+
+void loop() {
+  // Calcula a vazão em L/min
+  float vazaoAgua = contaPulso / 7.5; // 7.5 pulsos por litro (ajuste conforme o sensor)
+  Serial.print("Vazão: ");
+  Serial.print(vazaoAgua);
+  Serial.println(" L/min");
+
+  // Calcula o volume total em litros
+  float volumeTotal = (contaPulso / 7.5) * (millis() / 60000.0); // Tempo em minutos
+  Serial.print("Volume Total: ");
+  Serial.print(volumeTotal);
+  Serial.println(" litros");
+
+  delay(1000); // Aguarda 1 segundo
+}
+
+void contadorPulsos() {
+  contaPulso++;
+}
+
+===========================================================================================
+
+int flowPin = 2;    //Este é o pino de entrada no Arduino
+double flowRate;    //Este é o valor que pretende-se calcular
+volatile int count; //Este número precisa ser setado como volátil para garantir que ele seja atualizado corretamente durante o processo de interrupção
+ 
+void setup() {
+  pinMode(flowPin, INPUT); //Seta o pino de entrada
+  attachInterrupt(0, Flow, RISING);  //Configura o interruptor 0 (pino 2 no Arduino Uno) para rodar a função "Flow"
+  Serial.begin(9600); //Inicia o Serial
+}
+void loop() {
+  count = 0;      // Reseta o contador para iniciarmos a contagem em 0 novamente
+  interrupts();   //Habilita o interrupção no Arduino
+  delay (1000);   //Espera 1 segundo
+  noInterrupts(); //Desabilita o interrupção no Arduino
+   
+  //Cálculos matemáticos
+  flowRate = (count * 2.25);        //Conta os pulsos no último segundo e multiplica por 2,25mL, que é a vazão de cada pulso
+  flowRate = flowRate * 60;         //Converte segundos em minutos, tornando a unidade de medida mL/min
+  flowRate = flowRate / 1000;       //Converte mL em litros, tornando a unidade de medida L/min
+ 
+  Serial.println(flowRate);         //Imprime a variável flowRate no Serial
+}
+ 
+void Flow()
+{
+   count++; //Quando essa função é chamada, soma-se 1 a variável "count" 
+}

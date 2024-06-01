@@ -267,7 +267,7 @@ void setup()
     xTaskCreate(taskSensorDeFluxo, "fluxo", 2048, NULL, 5, NULL);
 
     //Task para calcular vazão
-    xTaskCreate(taskcalculaVazao, "vazao", 1024, NULL, 5, NULL);
+    xTaskCreate(taskcalculaVazao, "vazao", 2048, NULL, 5, NULL);
 }
 
 void loop() 
@@ -631,8 +631,12 @@ void leituraDePulsos()
 
 void taskcalculaVazao(void *params)
 {
-    double flowRate;
+    double vazao;
+    double tempVazao;
     int temPulso = 0;
+    int contadorDeTempo = 0;
+    double tempoEmMinutos = 0.0;
+    double litrosDeAgua = 0.0;
 
     while(true)
    {
@@ -644,20 +648,53 @@ void taskcalculaVazao(void *params)
 
     // Calcula a vazão em L/min
     xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
-    flowRate = contaPulso * 2.25 ; // 7.5 pulsos por litro (ajuste conforme o sensor)
+    //Trocar para 3.33mL
+    vazao = contaPulso * 2.25 ; //Conta os pulsos no último segundo e multiplica por 2,25mL, que é a vazão de cada pulso
     xSemaphoreGive(xInterrupcaoVazao);
-    flowRate = flowRate * 60;
-    flowRate = flowRate / 1000;
+    vazao = vazao * 60;   //Converte segundos em minutos, tornando a unidade de medida mL/min
+    vazao = vazao / 1000; //Converte mL em litros, tornando a unidade de medida L/min
     
     temPulso = temPulso + contaPulso;
+    
+    if(contaPulso > 0)
+    {
+        contadorDeTempo++;
+        Serial.print("ContaPulsos: ");
+        Serial.println(contaPulso);
+        Serial.print("contadorDeTempo: ");
+        Serial.println(contadorDeTempo);
+        tempVazao = vazao;
+    }
+    else
+    {
+        tempoEmMinutos = (double) contadorDeTempo/60;
+        if(tempoEmMinutos != 0)
+        {
+            litrosDeAgua = tempoEmMinutos * tempVazao;
+        }
+        
+        Serial.print("Vazão: ");
+        Serial.print(tempVazao);
+        Serial.println(" L/min");
+        Serial.print("contadorDeTempo: ");
+        Serial.print(contadorDeTempo);
+        Serial.println(" seg ");
+        Serial.print("tempoEmMInutos: ");
+        Serial.print(tempoEmMinutos);
+        Serial.println(" min ");
+        Serial.println();
+        Serial.print("Volume Total: ");
+        Serial.print(litrosDeAgua);
+        Serial.println(" litros");
 
-    Serial.println("primeira medida");
-    Serial.print("Vazão: ");
-    Serial.print(flowRate);
-    Serial.println(" L/min");
+        contadorDeTempo = 0;
 
+    }
+   litrosDeAgua = tempoEmMinutos * tempVazao;
+    /*
     Serial.println();
     Serial.println("Segunda medida");
+    //Trocar para 6.6 pulsos por litro
     float vazaoAgua = contaPulso / 7.5; // 7.5 pulsos por litro (ajuste conforme o sensor)
     Serial.print("Vazão: ");
     Serial.print(vazaoAgua);
@@ -668,8 +705,7 @@ void taskcalculaVazao(void *params)
     Serial.print("Volume Total: ");
     Serial.print(volumeTotal);
     Serial.println(" litros");
-
-
+    */
 
    }
 }
