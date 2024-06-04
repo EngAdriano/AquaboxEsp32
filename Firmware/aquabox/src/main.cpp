@@ -8,6 +8,7 @@
 #include "Relogio.hpp"
 #include "ModuloRele.hpp"
 #include "EEPROM.h"
+#include "DHT.h"
 
 
 /* Libera prints para debug */
@@ -23,6 +24,7 @@
 #define RELE_SETOR_1        5
 #define RELE_SETOR_2        4
 #define BEEP                18 
+#define UMIDADE             13
 
 /* Comandos */
 #define DESLIGA_RELES       100         //Desliga todos os relés  
@@ -35,7 +37,7 @@
 #define DESLIGA_SETOR2      140         //desliga a inrrigação do setor 2
 #define LIGA_SETOR2         141         //Liga a inrrigação do setor 2
 #define DESLIGA_MANUTENCAO  200         //Desliga manutenção
-#define LIGA_MANUTENCAO     201         //Liga manutenção
+//#define LIGA_MANUTENCAO   201         //Liga manutenção
 #define SETOR1_LIGA         10          //Liga alguma função - Setor 1
 #define SETOR1_DESLIGA      11          //Desliga alguma função - Setor 1
 #define SETOR2_LIGA         20          //Liga alguma função - Setor 2
@@ -71,9 +73,26 @@
 #define TEMPO_BEEP_RAPIDO       200         //Tempo em milesegundos
 #define INTERVALO_BEEPS         100         //Tempo em milesegundos
 
+/* Estrutura da EEPROM 
+    Campo               Endereço
+==================================    
+modificado              (0)
+horaDeInicio            (1)
+minutoDeInicio          (2)
+duracao                 (3)
+diasDaSemana[0]         (4)     - dom
+diasDaSemana[1]         (5)     - seg
+diasDaSemana[2]         (6)     - ter
+diasDaSemana[3]         (7)     - qua
+diasDaSemana[4]         (8)     - qui
+diasDaSemana[5]         (9)     - sex
+diasDaSemana[6]         (10)    - sab
+habilitaSensorVazao     (11)
+habilitaSensorUmidade   (12)
+*/
 
 /* Demais defines */
-#define TAMANHO_EEPROM 11
+#define TAMANHO_EEPROM 14
 //#define MSG_BUFFER_SIZE 50
 //char msg[MSG_BUFFER_SIZE];
 
@@ -92,8 +111,7 @@ const char* mqtt_senha = "Liukin@0804";                                         
 const char* topico_tx = "Aquabox/tx";                                               //Tópico para transmitir dados
 const char* topico_rx = "Aquabox/rx";                                               //Tópico para receber dados
 
-/* Variáveis globais */
-bool flagManutencao = true;     //Utilizar para o botão manutenção
+/* Variáveis globais *
 
 /* Estruturas */
     struct irrigacaoConf
@@ -117,6 +135,13 @@ bool flagManutencao = true;     //Utilizar para o botão manutenção
         int statusErro = SEM_ERROS;
     };
 
+    struct statusSensores
+    {
+        bool habilitaVazao = true;
+        bool habilitaUmidade = true;
+        bool erroDeVazao = false;
+    };
+
     const char ALIAS1[] = "statusBomba";
     const char ALIAS2[] = "statusCaixa";
     const char ALIAS3[] = "statusSetor1";
@@ -128,6 +153,7 @@ bool flagManutencao = true;     //Utilizar para o botão manutenção
     
 struct irrigacaoConf conf_Irriga;
 struct statusAquabox statusRetorno;
+struct statusSensores habilitaSensor; 
 
 /* Protótipo das funções e tasks */
 void taskMqtt(void *params);
@@ -137,6 +163,8 @@ void taskReles(void *params);
 void taskRelogio(void *params);
 void taskSensorDeFluxo(void *params);
 void taskcalculaVazao(void *params);
+void taskTrataErro(void *params);
+void taskUmidadeTemperatura(void *params);
 void btnBombaPressionado();
 void btnBombaLiberado();
 void nivelBaixoPressionado();
@@ -164,6 +192,7 @@ SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando, xInterrupcao
 /* Objetos */
 WiFiClientSecure espCliente;                //Estância o objeto cliente
 PubSubClient cliente_MQTT(espCliente);      //Instancia o Cliente MQTT passando o objeto espClient
+DHT dht(UMIDADE, DHT22);
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -210,6 +239,9 @@ void setup()
 
     /* Sinal sonoro */
     sequenciaBeeps(1, TEMPO_BEEP_RAPIDO, INTERVALO_BEEPS);
+
+    /* Inicializa sensor dht22*/
+    dht.begin();
 
     /* Inicialização da região de EEPROM */
     if(conf_Irriga.modificado == 1)
@@ -268,6 +300,12 @@ void setup()
 
     //Task para calcular vazão
     xTaskCreate(taskcalculaVazao, "vazao", 2048, NULL, 5, NULL);
+
+    //Task para tratar os erros
+    xTaskCreate(taskTrataErro, "erros", 2048, NULL, 4, NULL);
+
+    //Task para o sensor de umidade e temperatura
+    xTaskCreate(taskUmidadeTemperatura, "umidade", 2048, NULL, 4, NULL);
 }
 
 void loop() 
@@ -540,6 +578,7 @@ void taskControle(void *params)
     int receive = 0;
     int result = 0;
     bool erro = true;
+    int checarPulsos = 0;
 
     while(true)
     {
@@ -551,17 +590,7 @@ void taskControle(void *params)
             Serial.println (receive);
         #endif
 
-        if (receive == DESLIGA_MANUTENCAO)
-        {
-            flagManutencao = false;
-        }
-
-        if (receive == LIGA_MANUTENCAO)
-        {
-            flagManutencao = true;
-        }
-
-        if (receive >= DESLIGA_RELES && receive <= LIGA_SETOR2 && flagManutencao == true)
+        if ((receive >= DESLIGA_RELES) && (receive <= LIGA_SETOR2))
         {
             result = xQueueSend(xQueue_Reles, &receive, 500 / portTICK_PERIOD_MS);
             erro = dadoNaFila(result);
@@ -570,7 +599,7 @@ void taskControle(void *params)
                 erroFila();
                 erro = true;
             }
-        }
+        }       
 
         if(receive == STATUS)
         {
@@ -604,6 +633,49 @@ void taskControle(void *params)
     }
 }
 
+/* Task para tratamento dos essros */
+void taskTrataErro(void *params)
+{
+    int desliga = 0;
+    int result = 0;
+    bool erro = true;
+    int checarPulsos = 0;
+    
+    while(true)
+    {
+        vTaskDelay( 10000 / portTICK_PERIOD_MS );          // Tempo de espera para checar se tem fluxo de água
+
+         xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+
+        if((statusRetorno.statusBomba == BOMBA_LIGADA) && (habilitaSensor.habilitaVazao == true))
+        {
+            
+            checarPulsos = contaPulso;
+            vTaskDelay( 5000 / portTICK_PERIOD_MS );
+            if(checarPulsos != contaPulso)
+            {
+                habilitaSensor.erroDeVazao = false;
+            }
+            else
+            {
+                habilitaSensor.erroDeVazao = true;
+                desliga = DESLIGA_RELES;
+                result = xQueueSend(xQueue_Controle, &desliga, 500 / portTICK_PERIOD_MS);
+                erro = dadoNaFila(result);
+                if(!erro)
+                {
+                    erroFila();
+                    erro = true;
+                }
+
+                //TODO fazer rotina para enviar mensagem sobre erro de vazão
+            }
+        }
+
+        xSemaphoreGive(xEnviaComando);
+    }
+}
+
 void taskSensorDeFluxo(void *params)
 {
     EventoSensores sensorDeFluxo(SENSOR_DE_FLUXO, LOW);
@@ -612,7 +684,11 @@ void taskSensorDeFluxo(void *params)
 
     while(true)
     {
-        sensorDeFluxo.process();
+        if(habilitaSensor.habilitaVazao == true)
+        {
+            sensorDeFluxo.process();
+        }
+        
         /*
         #ifdef DEBUG
         Serial.print("Contagem de pulsos: ");
@@ -633,7 +709,7 @@ void taskcalculaVazao(void *params)
 {
     double vazao;
     double tempVazao;
-    int temPulso = 0;
+    //int temPulso = 0;
     int contadorDeTempo = 0;
     double tempoEmMinutos = 0.0;
     double litrosDeAgua = 0.0;
@@ -649,20 +725,23 @@ void taskcalculaVazao(void *params)
     // Calcula a vazão em L/min
     xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
     //Trocar para 3.33mL
-    vazao = contaPulso * 2.25 ; //Conta os pulsos no último segundo e multiplica por 2,25mL, que é a vazão de cada pulso
+    vazao = contaPulso * 3.33 ;         //Conta os pulsos no último segundo e multiplica por 2,25mL, que é a vazão de cada pulso
     xSemaphoreGive(xInterrupcaoVazao);
-    vazao = vazao * 60;   //Converte segundos em minutos, tornando a unidade de medida mL/min
-    vazao = vazao / 1000; //Converte mL em litros, tornando a unidade de medida L/min
+    vazao = vazao * 60;                 //Converte segundos em minutos, tornando a unidade de medida mL/min
+    vazao = vazao / 1000;               //Converte mL em litros, tornando a unidade de medida L/min
     
-    temPulso = temPulso + contaPulso;
+    //temPulso = temPulso + contaPulso;
     
     if(contaPulso > 0)
     {
         contadorDeTempo++;
-        Serial.print("ContaPulsos: ");
-        Serial.println(contaPulso);
-        Serial.print("contadorDeTempo: ");
-        Serial.println(contadorDeTempo);
+
+        #ifdef DEBUG
+            Serial.print("ContaPulsos: ");
+            Serial.println(contaPulso);
+            Serial.print("contadorDeTempo: ");
+            Serial.println(contadorDeTempo);
+        #endif
         tempVazao = vazao;
     }
     else
@@ -673,41 +752,50 @@ void taskcalculaVazao(void *params)
             litrosDeAgua = tempoEmMinutos * tempVazao;
         }
         
-        Serial.print("Vazão: ");
-        Serial.print(tempVazao);
-        Serial.println(" L/min");
-        Serial.print("contadorDeTempo: ");
-        Serial.print(contadorDeTempo);
-        Serial.println(" seg ");
-        Serial.print("tempoEmMInutos: ");
-        Serial.print(tempoEmMinutos);
-        Serial.println(" min ");
-        Serial.println();
-        Serial.print("Volume Total: ");
-        Serial.print(litrosDeAgua);
-        Serial.println(" litros");
+        #ifdef DEBUG
+            Serial.print("Vazão: ");
+            Serial.print(tempVazao);
+            Serial.println(" L/min");
+            Serial.print("contadorDeTempo: ");
+            Serial.print(contadorDeTempo);
+            Serial.println(" seg ");
+            Serial.print("tempoEmMInutos: ");
+            Serial.print(tempoEmMinutos);
+            Serial.println(" min ");
+            Serial.println();
+            Serial.print("Volume Total: ");
+            Serial.print(litrosDeAgua);
+            Serial.println(" litros");
+        #endif
 
         contadorDeTempo = 0;
 
     }
    litrosDeAgua = tempoEmMinutos * tempVazao;
-    /*
-    Serial.println();
-    Serial.println("Segunda medida");
-    //Trocar para 6.6 pulsos por litro
-    float vazaoAgua = contaPulso / 7.5; // 7.5 pulsos por litro (ajuste conforme o sensor)
-    Serial.print("Vazão: ");
-    Serial.print(vazaoAgua);
-    Serial.println(" L/min");
-
-    // Calcula o volume total em litros
-    float volumeTotal = (temPulso / 7.5) * (millis() / 60000.0); // Tempo em minutos
-    Serial.print("Volume Total: ");
-    Serial.print(volumeTotal);
-    Serial.println(" litros");
-    */
-
    }
+}
+
+void taskUmidadeTemperatura(void *params)
+{
+    float temperatura;
+    float umidade;
+
+    while(true)
+    {
+        temperatura = dht.readTemperature();
+        umidade = dht.readHumidity();
+
+        #ifdef DEBUG
+            Serial.println();
+            Serial.print("Umidade: ");
+            Serial.println(umidade);
+            Serial.print("Temperatura: ");
+            Serial.println(temperatura);
+            Serial.println();
+        #endif
+
+        vTaskDelay( 1000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+    }
 }
 
 void taskSensores(void *params)
@@ -733,6 +821,7 @@ void taskSensores(void *params)
     }
 }
 
+/*
 void btnManutencaoPressionado()
 {
     int result = 0;
@@ -766,7 +855,7 @@ void btnManutencaoliberado()
         erro = true;
     }
 }
-
+*/
 void btnBombaPressionado()
 {
     int result = 0;
@@ -881,6 +970,10 @@ void taskReles(void *params)
         switch (receive)
         {
         case 100:               //Desliga todos os relés
+            xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+            statusRetorno.statusBomba = BOMBA_DESLIGADA;
+            prontoParaReceber = true;
+            xSemaphoreGive(xStatusRetorno); 
             Reles.offAll();
             receive = 0;
             break;
