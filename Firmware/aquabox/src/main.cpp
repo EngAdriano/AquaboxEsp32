@@ -72,6 +72,7 @@
 /* Outras configurações */
 #define TEMPO_BEEP_RAPIDO       200         //Tempo em milesegundos
 #define INTERVALO_BEEPS         100         //Tempo em milesegundos
+#define TEMPO_DE_ESPERA_VAZAO   30000       //Tempo em milesegundos (30 segundos)
 
 /* Estrutura da EEPROM 
     Campo               Endereço
@@ -140,6 +141,7 @@ const char* topico_rx = "Aquabox/rx";                                           
         bool habilitaVazao = true;
         bool habilitaUmidade = true;
         bool erroDeVazao = false;
+        float umidadeChuva = 95.00;
     };
 
     const char ALIAS1[] = "statusBomba";
@@ -640,10 +642,11 @@ void taskTrataErro(void *params)
     int result = 0;
     bool erro = true;
     int checarPulsos = 0;
+    int repeticao = 0;
     
     while(true)
     {
-        vTaskDelay( 10000 / portTICK_PERIOD_MS );          // Tempo de espera para checar se tem fluxo de água
+        vTaskDelay( TEMPO_DE_ESPERA_VAZAO / portTICK_PERIOD_MS );          // Tempo de espera para checar se tem fluxo de água
 
          xSemaphoreTake(xEnviaComando, portMAX_DELAY);
 
@@ -655,19 +658,28 @@ void taskTrataErro(void *params)
             if(checarPulsos != contaPulso)
             {
                 habilitaSensor.erroDeVazao = false;
+                statusRetorno.statusErro = SEM_ERROS;
             }
             else
             {
-                habilitaSensor.erroDeVazao = true;
-                desliga = DESLIGA_RELES;
-                result = xQueueSend(xQueue_Controle, &desliga, 500 / portTICK_PERIOD_MS);
-                erro = dadoNaFila(result);
-                if(!erro)
+                    repeticao++;
+               
+                if(repeticao >= 3)
                 {
-                    erroFila();
-                    erro = true;
-                }
+                    habilitaSensor.erroDeVazao = true;
+                    statusRetorno.statusErro = ERRO_DE_VAZAO;
+                    desliga = DESLIGA_RELES;
+                    result = xQueueSend(xQueue_Controle, &desliga, 500 / portTICK_PERIOD_MS);
+                    erro = dadoNaFila(result);
+                    if(!erro)
+                    {
+                        erroFila();
+                        erro = true;
+                    }
 
+                    repeticao = 0;
+                }
+                
                 //TODO fazer rotina para enviar mensagem sobre erro de vazão
             }
         }
@@ -751,7 +763,7 @@ void taskcalculaVazao(void *params)
         {
             litrosDeAgua = tempoEmMinutos * tempVazao;
         }
-        
+        /*
         #ifdef DEBUG
             Serial.print("Vazão: ");
             Serial.print(tempVazao);
@@ -767,7 +779,7 @@ void taskcalculaVazao(void *params)
             Serial.print(litrosDeAgua);
             Serial.println(" litros");
         #endif
-
+        */
         contadorDeTempo = 0;
 
     }
@@ -779,6 +791,8 @@ void taskUmidadeTemperatura(void *params)
 {
     float temperatura;
     float umidade;
+
+    vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
 
     while(true)
     {
@@ -792,9 +806,14 @@ void taskUmidadeTemperatura(void *params)
             Serial.print("Temperatura: ");
             Serial.println(temperatura);
             Serial.println();
+
+            if(umidade >= habilitaSensor.umidadeChuva)
+            {
+                Serial.println("Choveu!");
+            }
         #endif
 
-        vTaskDelay( 1000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+        vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
     }
 }
 
@@ -1281,6 +1300,8 @@ void escreverEEPROM()
     EEPROM.write(8,conf_Irriga.diasDaSemana[4]);
     EEPROM.write(9,conf_Irriga.diasDaSemana[5]);
     EEPROM.write(10,conf_Irriga.diasDaSemana[6]);
+    EEPROM.write(11,habilitaSensor.habilitaUmidade);
+    EEPROM.write(12,habilitaSensor.habilitaVazao);
 
     EEPROM.commit();
 
@@ -1303,6 +1324,8 @@ void lerEEPROM()
     conf_Irriga.diasDaSemana[4] = EEPROM.read(8);
     conf_Irriga.diasDaSemana[5] = EEPROM.read(9);
     conf_Irriga.diasDaSemana[6] = EEPROM.read(10);
+    habilitaSensor.habilitaUmidade = EEPROM.read(11);
+    habilitaSensor.habilitaVazao = EEPROM.read(12);
 
     #ifdef DEBUG
         Serial.println("EEPROM lida");
@@ -1318,6 +1341,8 @@ void lerEEPROM()
         Serial.println(conf_Irriga.diasDaSemana[5]);
         Serial.println(conf_Irriga.diasDaSemana[6]);
         Serial.println(conf_Irriga.tempoDeDuracao);
+        Serial.println(habilitaSensor.habilitaUmidade);
+        Serial.println(habilitaSensor.habilitaVazao);
     #endif
 }
 
