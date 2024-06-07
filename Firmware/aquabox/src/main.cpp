@@ -37,7 +37,6 @@
 #define DESLIGA_SETOR2      140         //desliga a inrrigação do setor 2
 #define LIGA_SETOR2         141         //Liga a inrrigação do setor 2
 #define DESLIGA_MANUTENCAO  200         //Desliga manutenção
-//#define LIGA_MANUTENCAO   201         //Liga manutenção
 #define SETOR1_LIGA         10          //Liga alguma função - Setor 1
 #define SETOR1_DESLIGA      11          //Desliga alguma função - Setor 1
 #define SETOR2_LIGA         20          //Liga alguma função - Setor 2
@@ -46,6 +45,8 @@
 #define CONFIGURACAO        300         //Comando para alterar a configuração de irrigação
 #define STATUS              301         //Comando para o Aquabox enviar informações sobre o sistema
 #define RE_START            302         //Reinicializar todo o sistema
+#define SENSOR_UMID_TEMP    303         //Informações de umidade e temperatura no ambiente do AQUABOX
+#define HABILITA_SENSOR     304         //Comando para habilitar ou desabilitar sensor de umidade/Temperatura e vazão
 
 /* Códigos de Retornos */
 #define BOMBA_LIGADA            112         //Avisar que a bom esta ligada
@@ -58,8 +59,6 @@
 #define SETOR1_DESLIGADO        133         //Avisar qye o setor 1 da irrigação está desligado
 #define SETOR2_LIGADO           142         //Avisar que o setor 1 da irrigação está ligado
 #define SETOR2_DESLIGADO        143         //Avisar qye o setor 1 da irrigação está desligado
-#define MANUTENCAO_LIGADA       202         //Avisar que o botão de manutenção esta ligado (modo manutenção)
-#define MANUTENCAO_DESLIGADA    203         //Avisar que o botão de manutenção esta desligado (fora do modo manutenção)
 #define DIA_DE_CHUVA            204         //Informar que choveu e não vai ligar a irrigação
 
 /* Códigos de erros e comandos aceitos */
@@ -73,6 +72,7 @@
 #define TEMPO_BEEP_RAPIDO       200         //Tempo em milesegundos
 #define INTERVALO_BEEPS         100         //Tempo em milesegundos
 #define TEMPO_DE_ESPERA_VAZAO   30000       //Tempo em milesegundos (30 segundos)
+#define OFFSET_UMIDADE          10          //Offset para ajuste da umidade
 
 /* Estrutura da EEPROM 
     Campo               Endereço
@@ -101,6 +101,8 @@ habilitaSensorUmidade   (12)
 String msgRX;
 //bool prontoParaEnviar = true;
 bool prontoParaReceber = true;
+float temperatura;
+float umidade;
 
 // Variáveis para contagem de pulsos
 volatile int contaPulso = 0;        //Variável para a quantidade de pulsos
@@ -132,14 +134,13 @@ const char* topico_rx = "Aquabox/rx";                                           
         int statusCaixa = CAIXA_NORMAL;
         int statusSetor1 = SETOR1_DESLIGADO;
         int statusSetor2 = SETOR2_DESLIGADO;
-        int statusManutencao = MANUTENCAO_DESLIGADA;
         int statusErro = SEM_ERROS;
     };
 
     struct statusSensores
     {
-        bool habilitaVazao = true;
-        bool habilitaUmidade = true;
+        int habilitaVazao = 1;
+        int habilitaUmidade = 1;
         bool erroDeVazao = false;
         float umidadeChuva = 95.00;
     };
@@ -148,9 +149,10 @@ const char* topico_rx = "Aquabox/rx";                                           
     const char ALIAS2[] = "statusCaixa";
     const char ALIAS3[] = "statusSetor1";
     const char ALIAS4[] = "statusSetor2";
-    const char ALIAS5[] = "statusManutencao";
-    const char ALIAS6[] = "statusErro";
-    const char ALIAS7[] = "statusDoComando";
+    const char ALIAS5[] = "statusErro";
+    const char ALIAS6[] = "statusDoComando";
+    const char ALIAS7[] = "Umidade";
+    const char ALIAS8[] = "Temperatura";
 
     
 struct irrigacaoConf conf_Irriga;
@@ -409,7 +411,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
     }
 
     #ifdef DEBUG
-    //Serial.println(msgRX);        //Retirar. apenas para teste
+    Serial.println(msgRX);        //Retirar. apenas para teste
     #endif
 
     // Aloca o documento JSON
@@ -454,7 +456,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
             //Cria o objeto dinâmico "json" com tamanho "6" para a biblioteca
             JsonDocument json;
             //Atrela ao objeto "json" os dados definidos
-            json[ALIAS7] = statusDoComando;
+            json[ALIAS6] = statusDoComando;
             //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
             size_t tamanho_payload = measureJson(json) + 1;
 
@@ -549,6 +551,63 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         xSemaphoreGive(xEnviaComando);
     }
 
+    if(comando == SENSOR_UMID_TEMP)
+    {
+        /*
+        {
+            "comando": "303"
+        }
+        */
+
+        result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+        erro = dadoNaFila(result);
+        if(!erro)
+        {
+            erroFila();
+            erro = true;
+        }
+        
+        xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+        comando = 0;
+        xSemaphoreGive(xEnviaComando);
+    }
+
+    if(comando == HABILITA_SENSOR)
+    {
+        /*
+        {
+            "comando": "304",
+            "umidade": "valor", 
+            "vazao": "valor"  
+        }
+        */
+
+       xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+
+        habilitaSensor.habilitaUmidade = doc["umidade"];
+        habilitaSensor.habilitaVazao = doc["vazao"];
+
+        #ifdef DEBUG
+        Serial.println();
+        Serial.print("Umidade: ");
+        Serial.println(habilitaSensor.habilitaUmidade);
+        Serial.println((bool)doc["umidade"]);
+        Serial.print("Vazão: ");
+        Serial.println(habilitaSensor.habilitaVazao);
+        #endif
+
+        EEPROM.write(11,habilitaSensor.habilitaUmidade);
+        EEPROM.write(12,habilitaSensor.habilitaVazao);
+
+        EEPROM.commit();
+
+        sequenciaBeeps(1, TEMPO_BEEP_RAPIDO, INTERVALO_BEEPS);
+        lerEEPROM();
+        comando = 0;
+
+        xSemaphoreGive(xEnviaComando);
+    }
+
     if(comando == RE_START)
     {
         /* Modelo do Json de configuração recebido */
@@ -612,8 +671,36 @@ void taskControle(void *params)
             json[ALIAS2] = statusRetorno.statusCaixa;
             json[ALIAS3] = statusRetorno.statusSetor1;
             json[ALIAS4] = statusRetorno.statusSetor2;
-            json[ALIAS5] = statusRetorno.statusManutencao;
-            json[ALIAS6] = statusRetorno.statusErro;
+            json[ALIAS5] = statusRetorno.statusErro;
+
+            //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+            size_t tamanho_payload = measureJson(json) + 1;
+
+            //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+            char payload[tamanho_payload];
+
+            //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+            serializeJson(json, payload, tamanho_payload);
+
+            //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+            publicarMensagem(topico_tx, payload);
+
+            #ifdef DEBUG
+                Serial.print("Json enviado para topico: topico/tx ");
+                Serial.println(payload);
+            #endif
+        }
+
+        if(receive == SENSOR_UMID_TEMP)
+        {
+            //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+            JsonDocument json;
+
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+            //Atrela ao objeto "json" os dados definidos
+            json[ALIAS7] = umidade;
+            json[ALIAS8] = temperatura;
+            xSemaphoreGive(xEnviaComando);
 
             //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
             size_t tamanho_payload = measureJson(json) + 1;
@@ -635,7 +722,7 @@ void taskControle(void *params)
     }
 }
 
-/* Task para tratamento dos essros */
+/* Task para tratamento dos erros */
 void taskTrataErro(void *params)
 {
     int desliga = 0;
@@ -701,6 +788,7 @@ void taskSensorDeFluxo(void *params)
             sensorDeFluxo.process();
         }
         
+        vTaskDelay( 20 / portTICK_PERIOD_MS );
         /*
         #ifdef DEBUG
         Serial.print("Contagem de pulsos: ");
@@ -789,16 +877,16 @@ void taskcalculaVazao(void *params)
 
 void taskUmidadeTemperatura(void *params)
 {
-    float temperatura;
-    float umidade;
 
     vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
 
     while(true)
     {
+        xSemaphoreTake(xEnviaComando, portMAX_DELAY);
         temperatura = dht.readTemperature();
-        umidade = dht.readHumidity();
-
+        umidade = dht.readHumidity() - OFFSET_UMIDADE;
+        xSemaphoreGive(xEnviaComando);
+        
         #ifdef DEBUG
             Serial.println();
             Serial.print("Umidade: ");
@@ -840,41 +928,6 @@ void taskSensores(void *params)
     }
 }
 
-/*
-void btnManutencaoPressionado()
-{
-    int result = 0;
-    int comando = LIGA_MANUTENCAO;
-    bool erro = true;
-
-    #ifdef DEBUG
-        Serial.println("Botão da Manutenção pressionado");
-    #endif
-
-    result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
-    erro = dadoNaFila(result);
-    if(!erro)
-    {
-        erroFila();
-        erro = true;
-    }
-}
-
-void btnManutencaoliberado()
-{
-    int result = 0;
-    int comando = DESLIGA_MANUTENCAO;
-    bool erro = true;
-
-    result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
-    erro = dadoNaFila(result);
-    if(!erro)
-    {
-        erroFila();
-        erro = true;
-    }
-}
-*/
 void btnBombaPressionado()
 {
     int result = 0;
