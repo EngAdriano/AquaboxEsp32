@@ -12,7 +12,7 @@
 
 
 /* Libera prints para debug */
-#define DEBUG
+//#define DEBUG
 
 /* Pinos GPIOs */
 #define BOMBA               36
@@ -36,12 +36,10 @@
 #define LIGA_SETOR1         131         //Liga a inrrigação do setor 1
 #define DESLIGA_SETOR2      140         //desliga a inrrigação do setor 2
 #define LIGA_SETOR2         141         //Liga a inrrigação do setor 2
-#define DESLIGA_MANUTENCAO  200         //Desliga manutenção
 #define SETOR1_LIGA         10          //Liga alguma função - Setor 1
 #define SETOR1_DESLIGA      11          //Desliga alguma função - Setor 1
 #define SETOR2_LIGA         20          //Liga alguma função - Setor 2
 #define SETOR2_DESLIGA      21          //Desliga alguma função - Setor 2
-#define TEMPO_INTERVALO     5           //Tempo de intervalo para iniciar o segundo setor
 #define CONFIGURACAO        300         //Comando para alterar a configuração de irrigação
 #define STATUS              301         //Comando para o Aquabox enviar informações sobre o sistema
 #define RE_START            302         //Reinicializar todo o sistema
@@ -73,6 +71,7 @@
 #define INTERVALO_BEEPS         100         //Tempo em milesegundos
 #define TEMPO_DE_ESPERA_VAZAO   30000       //Tempo em milesegundos (30 segundos)
 #define OFFSET_UMIDADE          10          //Offset para ajuste da umidade
+#define TEMPO_INTERVALO         5           //Tempo de intervalo para iniciar o segundo setor
 
 /* Estrutura da EEPROM 
     Campo               Endereço
@@ -197,6 +196,8 @@ SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando, xInterrupcao
 WiFiClientSecure espCliente;                //Estância o objeto cliente
 PubSubClient cliente_MQTT(espCliente);      //Instancia o Cliente MQTT passando o objeto espClient
 DHT dht(UMIDADE, DHT22);
+//Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+JsonDocument json;
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -285,36 +286,47 @@ void setup()
     xInterrupcaoVazao = xSemaphoreCreateMutex();
 
     //Task de monitoramento e leitura dos sensores de nível
-    xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 4, NULL);
+    //xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 5, NULL);
+    xTaskCreatePinnedToCore(taskRelogio, "Relogio", 2048, NULL, 1, NULL, 1);
 
     //Task para trabalhos co relógio de tempo real
-    xTaskCreate(taskSensores, "Sensores", 2048, NULL, 5, NULL); 
+    //xTaskCreate(taskSensores, "Sensores", 2048, NULL, 4, NULL);
+    xTaskCreatePinnedToCore(taskSensores, "Sensores", 2048, NULL, 2, NULL, 1);
 
     //Task de acionamento dos relés
-    xTaskCreate(taskReles, "Reles", 2048, NULL, 5,NULL);
+    //xTaskCreate(taskReles, "Reles", 2048, NULL, 3,NULL);
+    xTaskCreatePinnedToCore(taskReles, "Reles", 2048, NULL, 1,NULL, 1);
 
     //Task de controle
-    xTaskCreate(taskControle, "Controle", 2048, NULL, 5, NULL); 
+    //xTaskCreate(taskControle, "Controle", 2048, NULL, 4, NULL); 
+    xTaskCreatePinnedToCore(taskControle, "Controle", 2048, NULL, 1, NULL, 1);
 
     //Task de comunicação MQTT
-    xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);     
+    //xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
+    xTaskCreatePinnedToCore(taskMqtt, "mqtt", 4096, NULL, 1, NULL, 1);     
 
     //Task contador de pulsos do sensor de fluxo
-    xTaskCreate(taskSensorDeFluxo, "fluxo", 2048, NULL, 5, NULL);
+    //xTaskCreate(taskSensorDeFluxo, "fluxo", 2048, NULL, 3, NULL);
+    xTaskCreatePinnedToCore(taskSensorDeFluxo, "fluxo", 2048, NULL, 1, NULL, 1);
 
     //Task para calcular vazão
-    xTaskCreate(taskcalculaVazao, "vazao", 2048, NULL, 5, NULL);
+    //xTaskCreate(taskcalculaVazao, "vazao", 2048, NULL, 3, NULL);
+    xTaskCreatePinnedToCore(taskcalculaVazao, "vazao", 2048, NULL, 1, NULL, 1);
 
     //Task para tratar os erros
-    xTaskCreate(taskTrataErro, "erros", 2048, NULL, 4, NULL);
+    //xTaskCreate(taskTrataErro, "erros", 2048, NULL, 3, NULL);
+    xTaskCreatePinnedToCore(taskTrataErro, "erros", 2048, NULL, 2, NULL, 1);
 
     //Task para o sensor de umidade e temperatura
-    xTaskCreate(taskUmidadeTemperatura, "umidade", 2048, NULL, 4, NULL);
+    //xTaskCreate(taskUmidadeTemperatura, "umidade", 2048, NULL, 4, NULL);
+    xTaskCreatePinnedToCore(taskUmidadeTemperatura, "umidade", 2048, NULL, 2, NULL, 1);
 }
 
 void loop() 
 {
-  
+
+    /* Supende tarefa LOOP */
+    vTaskSuspend(NULL);
 }
 
 /* --------------------------------------------------*/
@@ -454,7 +466,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         else
         {
             //Cria o objeto dinâmico "json" com tamanho "6" para a biblioteca
-            JsonDocument json;
+            //JsonDocument json;
             //Atrela ao objeto "json" os dados definidos
             json[ALIAS6] = statusDoComando;
             //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
@@ -468,6 +480,8 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
 
             //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
             publicarMensagem(topico_tx, payload);
+
+            json.clear();
         }
     }
 
@@ -619,7 +633,6 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         /* Comando para reinicializar o ESP32 */
         esp_restart();
     }
-    
     msgRX = "";
 }
 
@@ -665,7 +678,7 @@ void taskControle(void *params)
         if(receive == STATUS)
         {
             //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
-            JsonDocument json;
+            //JsonDocument json;
             //Atrela ao objeto "json" os dados definidos
             json[ALIAS1] = statusRetorno.statusBomba;
             json[ALIAS2] = statusRetorno.statusCaixa;
@@ -689,12 +702,14 @@ void taskControle(void *params)
                 Serial.print("Json enviado para topico: topico/tx ");
                 Serial.println(payload);
             #endif
+
+            json.clear();
         }
 
         if(receive == SENSOR_UMID_TEMP)
         {
             //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
-            JsonDocument json;
+            //JsonDocument json;
 
             xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             //Atrela ao objeto "json" os dados definidos
@@ -713,6 +728,8 @@ void taskControle(void *params)
 
             //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
             publicarMensagem(topico_tx, payload);
+
+            json.clear();
 
             #ifdef DEBUG
                 Serial.print("Json enviado para topico: topico/tx ");
@@ -788,7 +805,7 @@ void taskSensorDeFluxo(void *params)
             sensorDeFluxo.process();
         }
         
-        vTaskDelay( 20 / portTICK_PERIOD_MS );
+        vTaskDelay( 50 / portTICK_PERIOD_MS );
         /*
         #ifdef DEBUG
         Serial.print("Contagem de pulsos: ");
