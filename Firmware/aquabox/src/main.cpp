@@ -708,7 +708,7 @@ void taskControle(void *params)
 
         if(receive == SENSOR_UMID_TEMP)
         {
-            //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+            //Cria o objeto dinamico "json" com tamanho "2" para a biblioteca
             //JsonDocument json;
 
             xSemaphoreTake(xEnviaComando, portMAX_DELAY);
@@ -783,11 +783,9 @@ void taskTrataErro(void *params)
 
                     repeticao = 0;
                 }
-                
-                //TODO fazer rotina para enviar mensagem sobre erro de vazão
             }
         }
-
+        
         xSemaphoreGive(xEnviaComando);
     }
 }
@@ -901,7 +899,7 @@ void taskUmidadeTemperatura(void *params)
     {
         xSemaphoreTake(xEnviaComando, portMAX_DELAY);
         temperatura = dht.readTemperature();
-        umidade = dht.readHumidity() - OFFSET_UMIDADE;
+        umidade = dht.readHumidity();        //- OFFSET_UMIDADE;
         xSemaphoreGive(xEnviaComando);
         
         #ifdef DEBUG
