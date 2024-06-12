@@ -12,7 +12,7 @@
 
 
 /* Libera prints para debug */
-//#define DEBUG
+#define DEBUG
 
 /* Pinos GPIOs */
 #define BOMBA               36
@@ -102,6 +102,9 @@ String msgRX;
 bool prontoParaReceber = true;
 float temperatura;
 float umidade;
+bool flagNivelBaixo = false;
+bool flagNivelAlto = false;
+bool flagIrrigacaoAtiva = false;
 
 // Variáveis para contagem de pulsos
 volatile int contaPulso = 0;        //Variável para a quantidade de pulsos
@@ -168,6 +171,7 @@ void taskSensorDeFluxo(void *params);
 void taskcalculaVazao(void *params);
 void taskTrataErro(void *params);
 void taskUmidadeTemperatura(void *params);
+void taskCaixaDAgua(void *params);
 void btnBombaPressionado();
 void btnBombaLiberado();
 void nivelBaixoPressionado();
@@ -190,7 +194,7 @@ void leituraDePulsos();
 QueueHandle_t xQueue_Reles, xQueue_Controle;
 
 /* semaforos utilizados */
-SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando, xInterrupcaoVazao;
+SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando, xInterrupcaoVazao, xCaixa_DAgua;
 
 /* Objetos */
 WiFiClientSecure espCliente;                //Estância o objeto cliente
@@ -284,6 +288,7 @@ void setup()
     xStatusRetorno = xSemaphoreCreateMutex();
     xEnviaComando = xSemaphoreCreateMutex();
     xInterrupcaoVazao = xSemaphoreCreateMutex();
+    xCaixa_DAgua = xSemaphoreCreateMutex();
 
     //Task de monitoramento e leitura dos sensores de nível
     //xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 5, NULL);
@@ -320,6 +325,9 @@ void setup()
     //Task para o sensor de umidade e temperatura
     //xTaskCreate(taskUmidadeTemperatura, "umidade", 2048, NULL, 4, NULL);
     xTaskCreatePinnedToCore(taskUmidadeTemperatura, "umidade", 2048, NULL, 2, NULL, 1);
+
+    /* Task para gerenciamento da caixa dágua */
+    xTaskCreatePinnedToCore(taskCaixaDAgua, "caixa DAgua", 2048, NULL, 1, NULL, 1);
 }
 
 void loop() 
@@ -646,6 +654,69 @@ void publicarMensagem(const char* topico, String payload)
     }
 }
 
+void taskCaixaDAgua(void *params)
+{
+    int receive = 0;
+    int result = 0;
+    bool erro = true;
+    bool enviaComandoLiga = true;
+    bool enviaComandoDesliga = false;
+
+    while(true)
+    {
+        xSemaphoreTake(xCaixa_DAgua, portMAX_DELAY);
+        if(flagIrrigacaoAtiva == false)
+        {
+            if((flagNivelBaixo == true) && (prontoParaReceber == true) && (enviaComandoLiga == true))
+            {
+                receive = LIGA_CAIXA;
+                result = xQueueSend(xQueue_Controle, &receive, 500 / portTICK_PERIOD_MS);
+                erro = dadoNaFila(result);
+                if(!erro)
+                {
+                    erroFila();
+                    erro = true;
+                }
+
+                enviaComandoLiga = false;
+                enviaComandoDesliga = true;
+                receive = 0;
+
+                #ifdef DEBUG
+                Serial.println("Comando para a caixa ligar foi enviado");
+                #endif
+            }
+         }
+            if((flagNivelAlto == true) && (prontoParaReceber == false) && (enviaComandoDesliga == true))
+            {
+                receive = DESLIGA_CAIXA;
+                result = xQueueSend(xQueue_Controle, &receive, 500 / portTICK_PERIOD_MS);
+                erro = dadoNaFila(result);
+                if(!erro)
+                {
+                    erroFila();
+                    erro = true;
+                }
+
+                enviaComandoLiga = true;
+                enviaComandoDesliga = false;
+                receive = 0;
+
+                #ifdef DEBUG
+                Serial.println("Comando para a caixa desligar foi enviado");
+                #endif
+            }
+            
+            if((flagNivelAlto == false) && (flagNivelBaixo == false))
+            {
+                statusRetorno.statusCaixa = CAIXA_NORMAL;
+            }
+       
+         xSemaphoreGive(xCaixa_DAgua);
+    }
+}
+
+
 void taskControle(void *params)
 {
     /*Regra de negócio ficam aqui, centro de comando*/
@@ -657,7 +728,7 @@ void taskControle(void *params)
     while(true)
     {
         /* Espera até algo ser recebido na queue */
-        xQueueReceive(xQueue_Controle, (void *)&receive, portMAX_DELAY);
+        xQueueReceive(xQueue_Controle, &receive, portMAX_DELAY);
 
         #ifdef DEBUG
             Serial.print("Comando chegou no controle: ");
@@ -666,12 +737,17 @@ void taskControle(void *params)
 
         if ((receive >= DESLIGA_RELES) && (receive <= LIGA_SETOR2))
         {
-            result = xQueueSend(xQueue_Reles, &receive, 500 / portTICK_PERIOD_MS);
-            erro = dadoNaFila(result);
-            if(!erro)
+            if((prontoParaReceber == true) || (receive%2 == 0))
             {
-                erroFila();
-                erro = true;
+                result = xQueueSend(xQueue_Reles, &receive, 500 / portTICK_PERIOD_MS);
+                erro = dadoNaFila(result);
+                if(!erro)
+                {
+                    erroFila();
+                    erro = true;
+                }
+
+                receive = 0;
             }
         }       
 
@@ -704,6 +780,7 @@ void taskControle(void *params)
             #endif
 
             json.clear();
+            receive = 0;
         }
 
         if(receive == SENSOR_UMID_TEMP)
@@ -735,6 +812,7 @@ void taskControle(void *params)
                 Serial.print("Json enviado para topico: topico/tx ");
                 Serial.println(payload);
             #endif
+            receive = 0;
         }
     }
 }
@@ -927,7 +1005,6 @@ void taskSensores(void *params)
     EventoSensores nivelAlto(SENSOR_NIVEL_ALTO, LOW);
     EventoSensores btnBomba(BOMBA, LOW);
     
-
     nivelBaixo.setPressionadoCallback(&nivelBaixoPressionado);
     nivelAlto.setPressionadoCallback(&nivelAltoPressionado);
     nivelBaixo.setLiberadoCallback(&nivelBaixoLiberado);
@@ -983,9 +1060,11 @@ void nivelBaixoPressionado()
     int comando = LIGA_CAIXA;
     bool erro = true;
     xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+    flagNivelBaixo = true;
     statusRetorno.statusCaixa = CAIXA_VAZIA;
     xSemaphoreGive(xStatusRetorno);
 
+    /*
     result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
     erro = dadoNaFila(result);
     if(!erro)
@@ -993,6 +1072,7 @@ void nivelBaixoPressionado()
         erroFila();
         erro = true;
     }
+    */
 }
 
 void nivelAltoPressionado()
@@ -1000,7 +1080,12 @@ void nivelAltoPressionado()
     int result = 0;
     int comando = DESLIGA_CAIXA;
     bool erro = true;
+    xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
+    flagNivelAlto = true;
+    statusRetorno.statusCaixa = CAIXA_CHEIA;
+    xSemaphoreGive(xStatusRetorno);
 
+    /*
     result = xQueueSend(xQueue_Reles, &comando, 500 / portTICK_PERIOD_MS);
     erro = dadoNaFila(result);
     if(!erro)
@@ -1008,20 +1093,17 @@ void nivelAltoPressionado()
         erroFila();
         erro = true;
     }
+    */
 }
 
 void nivelBaixoLiberado()
 {
-    //Tratar depois para detectar erro no sensor
-    
+    flagNivelBaixo = false;
 }
 
 void nivelAltoLiberado()
 {
-    //Tratar depois para detectar erro no sensor
-    xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
-    statusRetorno.statusCaixa = CAIXA_NORMAL;
-    xSemaphoreGive(xStatusRetorno);
+    flagNivelAlto = false;
 }
 
 bool dadoNaFila(int result)
@@ -1072,7 +1154,6 @@ void taskReles(void *params)
             xSemaphoreGive(xStatusRetorno);            
             Reles.off(0);
             receive = 0;
-            prontoParaReceber = true;
             break;
 
         case 111:               //Liga somente a bomba
@@ -1223,6 +1304,7 @@ void taskRelogio(void *params)
                 {
                     enviaLigaSetor1 = 1;
                     naoRepeteComando = 0;
+                    flagIrrigacaoAtiva = true;
                 }
 
                 if((enviaLigaSetor1 == 1) && (prontoParaReceber == true))
@@ -1247,6 +1329,7 @@ void taskRelogio(void *params)
                     tempoDecorrido = 0;
                     
                 }
+
                 if((tempoDecorrido >= conf_Irriga.tempoDeDuracao) && (enviaDesligaSetor2 == 1))
                 {
                     setorComando = SETOR2_DESLIGA;
@@ -1340,6 +1423,7 @@ void taskRelogio(void *params)
             enviaDesligaSetor2 = 0;
             enviaLigaSetor1 = 0;
             naoRepeteComando = 1;
+            flagIrrigacaoAtiva = false;
             xSemaphoreGive(xEnviaComando);
             break;
         
