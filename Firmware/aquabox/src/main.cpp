@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <otadrive_esp.h>
 #include "WiFiManager.h"
 #include "EventoSensores.hpp"
 #include "Relogio.hpp"
@@ -73,6 +74,9 @@
 #define OFFSET_UMIDADE          10          //Offset para ajuste da umidade
 #define TEMPO_INTERVALO         5           //Tempo de intervalo para iniciar o segundo setor
 
+/* Configurações de OtaDrive */
+#define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
+#define FW_VER "v@1.0.2"                                // A versão do firmware
 /* Estrutura da EEPROM 
     Campo               Endereço
 ==================================    
@@ -188,7 +192,7 @@ void publicarMensagem(const char* topico, String payload);
 void beepSinal(int duracao);     //Duracao em milesegundos
 void sequenciaBeeps(int beeps, int duracao, int intervalo);  //Tempos em milisegundos
 void leituraDePulsos();
-
+void onUpdateProgress(int progress, int totalt);
 
 /* filas (queues) */
 QueueHandle_t xQueue_Reles, xQueue_Controle;
@@ -277,6 +281,14 @@ void setup()
             Serial.println("Conectado...");
         #endif
     }
+
+    /* Versão */
+    Serial.print("Versão do Firmware: ");
+    Serial.println(FW_VER);
+
+    /* Configuração do OtaDrive */
+    OTADRIVE.setInfo(APIKEY, FW_VER);
+    OTADRIVE.onUpdateFirmwareProgress(onUpdateProgress);
     
     //Criação da fila (Queue)
     ////Ao inicializar a fila devemos passar o tamanho dela e o tipo de dado. Pode ser inclusive estruturas
@@ -334,12 +346,48 @@ void loop()
 {
 
     /* Supende tarefa LOOP */
-    vTaskSuspend(NULL);
+    //vTaskSuspend(NULL);
+    log_i("Loop: versão do aplicativo %s", FW_VER);
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    // A cada 30 segundos
+    if (OTADRIVE.timeTick(30))
+    {
+      // recuperar informações de firmware do servidor ONEdrive
+      auto inf = OTADRIVE.updateFirmwareInfo();
+
+      // atualizar firmware se for mais recente disponível
+      if (inf.available)
+      {
+        log_i("\nNova versão disponível, %dBytes, %s\n", inf.size, inf.version.c_str());
+        OTADRIVE.updateFirmware();
+      }
+      else
+      {
+        log_i("\nNenhuma versão mais recente\n");
+      }
+    }
+  }
+  vTaskDelay( 5000 / portTICK_PERIOD_MS );
 }
 
 /* --------------------------------------------------*/
 /* --------------- Tarefas / Funções ----------------*/
 /* --------------------------------------------------*/
+
+// put function definitions here:
+void onUpdateProgress(int progress, int totalt)
+{
+  static int last = 0;
+  int progressPercent = (100 * progress) / totalt;
+  Serial.print("*");
+  if (last != progressPercent && progressPercent % 10 == 0)
+  {
+    // print every 10%
+    Serial.printf("%d", progressPercent);
+  }
+  last = progressPercent;
+}
 
 void taskMqtt(void *params)
 {
@@ -975,29 +1023,40 @@ void taskUmidadeTemperatura(void *params)
 
     while(true)
     {
-        xSemaphoreTake(xEnviaComando, portMAX_DELAY);
-        temperatura = dht.readTemperature();
-        umidade = dht.readHumidity();        //- OFFSET_UMIDADE;
-        xSemaphoreGive(xEnviaComando);
-        
-        #ifdef DEBUG
-        /*
-            Serial.println();
-            Serial.print("Umidade: ");
-            Serial.println(umidade);
-            Serial.print("Temperatura: ");
-            Serial.println(temperatura);
-            Serial.println();
+        if(habilitaSensor.habilitaUmidade == true)
+        {
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+            temperatura = dht.readTemperature();
+            umidade = dht.readHumidity();        //- OFFSET_UMIDADE;
+            xSemaphoreGive(xEnviaComando);
+            
+            #ifdef DEBUG
+            /*
+                Serial.println();
+                Serial.print("Umidade: ");
+                Serial.println(umidade);
+                Serial.print("Temperatura: ");
+                Serial.println(temperatura);
+                Serial.println();
 
-            if(umidade >= habilitaSensor.umidadeChuva)
-            {
-                Serial.println("Choveu!");
-            }
-        */
-        #endif
+                if(umidade >= habilitaSensor.umidadeChuva)
+                {
+                    Serial.println("Choveu!");
+                }
+            */
+            #endif
 
-        vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+            vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+        }
+        else
+        {
+            xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+            temperatura = 0.0;
+            umidade = 0.0;    
+            xSemaphoreGive(xEnviaComando);
+        }
     }
+        
 }
 
 void taskSensores(void *params)
