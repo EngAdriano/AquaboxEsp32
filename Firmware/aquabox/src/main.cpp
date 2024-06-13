@@ -12,7 +12,7 @@
 
 
 /* Libera prints para debug */
-#define DEBUG
+//#define DEBUG
 
 /* Pinos GPIOs */
 #define BOMBA               36
