@@ -12,7 +12,7 @@
 
 
 /* Libera prints para debug */
-//#define DEBUG
+#define DEBUG
 
 /* Pinos GPIOs */
 #define BOMBA               36
@@ -981,6 +981,7 @@ void taskUmidadeTemperatura(void *params)
         xSemaphoreGive(xEnviaComando);
         
         #ifdef DEBUG
+        /*
             Serial.println();
             Serial.print("Umidade: ");
             Serial.println(umidade);
@@ -992,6 +993,7 @@ void taskUmidadeTemperatura(void *params)
             {
                 Serial.println("Choveu!");
             }
+        */
         #endif
 
         vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
