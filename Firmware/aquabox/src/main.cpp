@@ -46,6 +46,8 @@
 #define RE_START            302         //Reinicializar todo o sistema
 #define SENSOR_UMID_TEMP    303         //Informações de umidade e temperatura no ambiente do AQUABOX
 #define HABILITA_SENSOR     304         //Comando para habilitar ou desabilitar sensor de umidade/Temperatura e vazão
+#define ATUALIZA_FIRMWARE   305         //Comando para atualizar o firmware
+#define VERSAO_FIRMWARE     306         //Mostra a versão do firmaware atual
 
 /* Códigos de Retornos */
 #define BOMBA_LIGADA            112         //Avisar que a bom esta ligada
@@ -76,7 +78,10 @@
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
-#define FW_VER "v@1.0.2"                                // A versão do firmware
+#define FW_VER "v@1.0.3"                                // A versão do firmware
+#define HABILITA_ATUALIZACAO    1                       //Habilita a atualização do firmware
+#define DESABILITA_ATUALIZACAO  0                       //Desabilita atualização do firmware                         
+
 /* Estrutura da EEPROM 
     Campo               Endereço
 ==================================    
@@ -109,6 +114,7 @@ float umidade;
 bool flagNivelBaixo = false;
 bool flagNivelAlto = false;
 bool flagIrrigacaoAtiva = false;
+bool atualizacaoFirmware = DESABILITA_ATUALIZACAO;
 
 // Variáveis para contagem de pulsos
 volatile int contaPulso = 0;        //Variável para a quantidade de pulsos
@@ -148,7 +154,7 @@ const char* topico_rx = "Aquabox/rx";                                           
         int habilitaVazao = 1;
         int habilitaUmidade = 1;
         bool erroDeVazao = false;
-        float umidadeChuva = 95.00;
+        float umidadeChuva = 85.00;
     };
 
     const char ALIAS1[] = "statusBomba";
@@ -159,6 +165,7 @@ const char* topico_rx = "Aquabox/rx";                                           
     const char ALIAS6[] = "statusDoComando";
     const char ALIAS7[] = "Umidade";
     const char ALIAS8[] = "Temperatura";
+    const char ALIAS9[] = "Versao";
 
     
 struct irrigacaoConf conf_Irriga;
@@ -289,6 +296,7 @@ void setup()
     /* Configuração do OtaDrive */
     OTADRIVE.setInfo(APIKEY, FW_VER);
     OTADRIVE.onUpdateFirmwareProgress(onUpdateProgress);
+    atualizacaoFirmware = DESABILITA_ATUALIZACAO;
     
     //Criação da fila (Queue)
     ////Ao inicializar a fila devemos passar o tamanho dela e o tipo de dado. Pode ser inclusive estruturas
@@ -345,13 +353,16 @@ void setup()
 void loop() 
 {
 
+    //TODO criar flag para fazer a atualização, assim não fica pedindo direto.
+
+
     /* Supende tarefa LOOP */
     //vTaskSuspend(NULL);
     log_i("Loop: versão do aplicativo %s", FW_VER);
   if (WiFi.status() == WL_CONNECTED)
   {
     // A cada 30 segundos
-    if (OTADRIVE.timeTick(30))
+    if (atualizacaoFirmware == HABILITA_ATUALIZACAO)                       // (OTADRIVE.timeTick(30))
     {
       // recuperar informações de firmware do servidor ONEdrive
       auto inf = OTADRIVE.updateFirmwareInfo();
@@ -365,6 +376,7 @@ void loop()
       else
       {
         log_i("\nNenhuma versão mais recente\n");
+        atualizacaoFirmware = DESABILITA_ATUALIZACAO;
       }
     }
   }
@@ -678,6 +690,42 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         xSemaphoreGive(xEnviaComando);
     }
 
+    if(comando == ATUALIZA_FIRMWARE)
+    {
+        /* Modelo do Json de atualiza firmware */
+        /*
+            {
+                "comando": "305"
+            }
+        */
+
+       xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+       atualizacaoFirmware = HABILITA_ATUALIZACAO;
+       comando = 0;
+       xSemaphoreGive(xEnviaComando);
+    }
+
+    if(comando == VERSAO_FIRMWARE)
+    {
+        /* Modelo do Json de atualiza firmware */
+        /*
+            {
+                "comando": "306"
+            }
+        */
+        result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+        erro = dadoNaFila(result);
+        if(!erro)
+        {
+            erroFila();
+            erro = true;
+        }
+        
+        xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+        comando = 0;
+        xSemaphoreGive(xEnviaComando);
+    }
+
     if(comando == RE_START)
     {
         /* Modelo do Json de configuração recebido */
@@ -690,6 +738,7 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         esp_restart();
     }
     msgRX = "";
+    
 }
 
 void publicarMensagem(const char* topico, String payload)
@@ -809,6 +858,31 @@ void taskControle(void *params)
             json[ALIAS3] = statusRetorno.statusSetor1;
             json[ALIAS4] = statusRetorno.statusSetor2;
             json[ALIAS5] = statusRetorno.statusErro;
+
+            //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+            size_t tamanho_payload = measureJson(json) + 1;
+
+            //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+            char payload[tamanho_payload];
+
+            //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+            serializeJson(json, payload, tamanho_payload);
+
+            //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+            publicarMensagem(topico_tx, payload);
+
+            #ifdef DEBUG
+                Serial.print("Json enviado para topico: topico/tx ");
+                Serial.println(payload);
+            #endif
+
+            json.clear();
+            receive = 0;
+        }
+
+        if(receive == VERSAO_FIRMWARE)
+        {
+            json[ALIAS9] = FW_VER;
 
             //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
             size_t tamanho_payload = measureJson(json) + 1;
