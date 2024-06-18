@@ -75,6 +75,7 @@
 #define TEMPO_DE_ESPERA_VAZAO   30000       //Tempo em milesegundos (30 segundos)
 #define OFFSET_UMIDADE          10          //Offset para ajuste da umidade
 #define TEMPO_INTERVALO         5           //Tempo de intervalo para iniciar o segundo setor
+#define HORA_RESETA_UMIDADE     22          //Hora para resetar a variável da umidade
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
@@ -114,6 +115,7 @@ float umidade;
 bool flagNivelBaixo = false;
 bool flagNivelAlto = false;
 bool flagIrrigacaoAtiva = false;
+bool flagHabilitaIrrigacao = true;
 bool atualizacaoFirmware = DESABILITA_ATUALIZACAO;
 
 // Variáveis para contagem de pulsos
@@ -352,12 +354,6 @@ void setup()
 
 void loop() 
 {
-
-    //TODO criar flag para fazer a atualização, assim não fica pedindo direto.
-
-
-    /* Supende tarefa LOOP */
-    //vTaskSuspend(NULL);
     log_i("Loop: versão do aplicativo %s", FW_VER);
   if (WiFi.status() == WL_CONNECTED)
   {
@@ -1102,7 +1098,14 @@ void taskUmidadeTemperatura(void *params)
             xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             temperatura = dht.readTemperature();
             umidade = dht.readHumidity();        //- OFFSET_UMIDADE;
+
+            if((umidade > habilitaSensor.umidadeChuva) && (flagHabilitaIrrigacao == true))
+            {
+                flagHabilitaIrrigacao = false;
+            }
             xSemaphoreGive(xEnviaComando);
+
+
             
             #ifdef DEBUG
             /*
@@ -1433,7 +1436,7 @@ void taskRelogio(void *params)
             
             xSemaphoreTake(xEnviaComando, portMAX_DELAY);
 
-            if(conf_Irriga.diasDaSemana[diaDaSemana] == 1)
+            if((conf_Irriga.diasDaSemana[diaDaSemana] == 1) && (flagHabilitaIrrigacao == true))
             {
                 if((conf_Irriga.horaDeInicio == timeinfo.tm_hour) && (conf_Irriga.minutoDeInicio == timeinfo.tm_min) && (naoRepeteComando == 1))
                 {
@@ -1477,6 +1480,11 @@ void taskRelogio(void *params)
                 #ifdef DEBUG
                     Serial.println("Não precisa ligar");
                 #endif
+
+                if(timeinfo.tm_hour >= HORA_RESETA_UMIDADE)
+                {
+                    flagHabilitaIrrigacao = true;
+                }
             }
 
             xSemaphoreGive(xEnviaComando);
