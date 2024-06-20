@@ -72,8 +72,7 @@
 /* Outras configurações */
 #define TEMPO_BEEP_RAPIDO       200         //Tempo em milesegundos
 #define INTERVALO_BEEPS         100         //Tempo em milesegundos
-#define TEMPO_DE_ESPERA_VAZAO   30000       //Tempo em milesegundos (30 segundos)
-#define OFFSET_UMIDADE          10          //Offset para ajuste da umidade
+#define TEMPO_DE_ESPERA_VAZAO   30000       //Tempo em milesegundos ( 10 segundos)
 #define TEMPO_INTERVALO         5           //Tempo de intervalo para iniciar o segundo setor
 #define HORA_RESETA_UMIDADE     22          //Hora para resetar a variável da umidade
 
@@ -110,8 +109,8 @@ habilitaSensorUmidade   (12)
 String msgRX;
 //bool prontoParaEnviar = true;
 bool prontoParaReceber = true;
-float temperatura;
-float umidade;
+float temperatura = 0.0;
+float umidade = 0.0;
 bool flagNivelBaixo = false;
 bool flagNivelAlto = false;
 bool flagIrrigacaoAtiva = false;
@@ -342,7 +341,7 @@ void setup()
 
     //Task para tratar os erros
     //xTaskCreate(taskTrataErro, "erros", 2048, NULL, 3, NULL);
-    xTaskCreatePinnedToCore(taskTrataErro, "erros", 2048, NULL, 2, NULL, 1);
+    xTaskCreatePinnedToCore(taskTrataErro, "erros", 2048, NULL, 1, NULL, 1);
 
     //Task para o sensor de umidade e temperatura
     //xTaskCreate(taskUmidadeTemperatura, "umidade", 2048, NULL, 4, NULL);
@@ -938,9 +937,14 @@ void taskControle(void *params)
 /* Task para tratamento dos erros */
 void taskTrataErro(void *params)
 {
+    //TODO Mudar a lógica do sensor de vazão
+    //===========================================================================================
+    //Ideia: dois contadores de pulsos, um para geral e outro para cálculod e vazao
+    
     int desliga = 0;
     int result = 0;
     bool erro = true;
+    int checarPulsoAntes = 0;  //Não utilizada ainda. 
     int checarPulsos = 0;
     int repeticao = 0;
     
@@ -978,6 +982,7 @@ void taskTrataErro(void *params)
                     }
 
                     repeticao = 0;
+                    checarPulsos = 0;
                 }
             }
         }
@@ -999,7 +1004,7 @@ void taskSensorDeFluxo(void *params)
             sensorDeFluxo.process();
         }
         
-        vTaskDelay( 50 / portTICK_PERIOD_MS );
+        //vTaskDelay( 50 / portTICK_PERIOD_MS );
         /*
         #ifdef DEBUG
         Serial.print("Contagem de pulsos: ");
@@ -1020,38 +1025,48 @@ void taskcalculaVazao(void *params)
 {
     double vazao;
     double tempVazao;
-    //int temPulso = 0;
     int contadorDeTempo = 0;
     double tempoEmMinutos = 0.0;
     double litrosDeAgua = 0.0;
+    int pulsoAnterior = 0;
+    int pulsoAtual = 0;
+    int pulsoUmSegunddo = 0;
 
     while(true)
    {
     xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
-    contaPulso = 0;
+    pulsoAnterior =  contaPulso;
     xSemaphoreGive(xInterrupcaoVazao);
 
     vTaskDelay( 1000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
 
+    xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
+    pulsoAtual =  contaPulso;
+    xSemaphoreGive(xInterrupcaoVazao);
+
+    pulsoUmSegunddo = pulsoAtual - pulsoAnterior;
+
     // Calcula a vazão em L/min
     xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
     //Trocar para 3.33mL
-    vazao = contaPulso * 3.33 ;         //Conta os pulsos no último segundo e multiplica por 2,25mL, que é a vazão de cada pulso
+    vazao = pulsoUmSegunddo * 3.33 ;         //Conta os pulsos no último segundo e multiplica por 2,25mL, que é a vazão de cada pulso
     xSemaphoreGive(xInterrupcaoVazao);
     vazao = vazao * 60;                 //Converte segundos em minutos, tornando a unidade de medida mL/min
     vazao = vazao / 1000;               //Converte mL em litros, tornando a unidade de medida L/min
     
     //temPulso = temPulso + contaPulso;
     
-    if(contaPulso > 0)
+    if(pulsoUmSegunddo > 0)
     {
         contadorDeTempo++;
 
         #ifdef DEBUG
-            Serial.print("ContaPulsos: ");
-            Serial.println(contaPulso);
+            Serial.print("PulsosPorSegundos: ");
+            Serial.println(pulsoUmSegunddo);
             Serial.print("contadorDeTempo: ");
             Serial.println(contadorDeTempo);
+            Serial.print("PulsosTotais: ");
+            Serial.println(contaPulso);
         #endif
         tempVazao = vazao;
     }
@@ -1062,7 +1077,7 @@ void taskcalculaVazao(void *params)
         {
             litrosDeAgua = tempoEmMinutos * tempVazao;
         }
-        /*
+        
         #ifdef DEBUG
             Serial.print("Vazão: ");
             Serial.print(tempVazao);
@@ -1078,8 +1093,9 @@ void taskcalculaVazao(void *params)
             Serial.print(litrosDeAgua);
             Serial.println(" litros");
         #endif
-        */
+        
         contadorDeTempo = 0;
+        contaPulso = 0;
 
     }
    litrosDeAgua = tempoEmMinutos * tempVazao;
@@ -1097,7 +1113,7 @@ void taskUmidadeTemperatura(void *params)
         {
             xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             temperatura = dht.readTemperature();
-            umidade = dht.readHumidity();        //- OFFSET_UMIDADE;
+            umidade = dht.readHumidity();        
 
             if((umidade > habilitaSensor.umidadeChuva) && (flagHabilitaIrrigacao == true))
             {
