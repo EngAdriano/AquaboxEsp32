@@ -13,7 +13,8 @@
 
 
 /* Libera prints para debug */
-//#define DEBUG
+#define DEBUG
+//#define DEBUG_TASK
 
 /* Pinos GPIOs */
 #define BOMBA               36
@@ -116,6 +117,8 @@ bool flagNivelAlto = false;
 bool flagIrrigacaoAtiva = false;
 bool flagHabilitaIrrigacao = true;
 bool atualizacaoFirmware = DESABILITA_ATUALIZACAO;
+bool enviaComandoLiga = true;
+bool enviaComandoDesliga = false;
 
 // Variáveis para contagem de pulsos
 volatile int contaPulso = 0;        //Variável para a quantidade de pulsos
@@ -211,7 +214,8 @@ SemaphoreHandle_t xConfig_irrigacao, xStatusRetorno, xEnviaComando, xInterrupcao
 /* Objetos */
 WiFiClientSecure espCliente;                //Estância o objeto cliente
 PubSubClient cliente_MQTT(espCliente);      //Instancia o Cliente MQTT passando o objeto espClient
-DHT dht(UMIDADE, DHT22);
+//DHT dht(UMIDADE, DHT22);
+
 //Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
 JsonDocument json;
 
@@ -261,9 +265,6 @@ void setup()
     /* Sinal sonoro */
     sequenciaBeeps(1, TEMPO_BEEP_RAPIDO, INTERVALO_BEEPS);
 
-    /* Inicializa sensor dht22*/
-    dht.begin();
-
     /* Inicialização da região de EEPROM */
     if(conf_Irriga.modificado == 1)
     {
@@ -279,15 +280,11 @@ void setup()
     res = wm.autoConnect("Aquabox");
     if(!res)
     {
-        #ifdef DEBUG
             Serial.println("Falha ao conectar");
-        #endif
     }
     else
     {
-        #ifdef DEBUG
             Serial.println("Conectado...");
-        #endif
     }
 
     /* Versão */
@@ -311,13 +308,16 @@ void setup()
     xInterrupcaoVazao = xSemaphoreCreateMutex();
     xCaixa_DAgua = xSemaphoreCreateMutex();
 
+    /* Inicializa sensor dht22*/
+    //dht.begin();
+
     //Task de monitoramento e leitura dos sensores de nível
     //xTaskCreate(taskRelogio, "Relogio", 2048, NULL, 5, NULL);
-    xTaskCreatePinnedToCore(taskRelogio, "Relogio", 2048, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(taskRelogio, "Relogio", 4096, NULL, 1, NULL, 1);
 
     //Task para trabalhos co relógio de tempo real
     //xTaskCreate(taskSensores, "Sensores", 2048, NULL, 4, NULL);
-    xTaskCreatePinnedToCore(taskSensores, "Sensores", 2048, NULL, 2, NULL, 1);
+    xTaskCreatePinnedToCore(taskSensores, "Sensores", 2048, NULL, 1, NULL, 1);
 
     //Task de acionamento dos relés
     //xTaskCreate(taskReles, "Reles", 2048, NULL, 3,NULL);
@@ -325,7 +325,7 @@ void setup()
 
     //Task de controle
     //xTaskCreate(taskControle, "Controle", 2048, NULL, 4, NULL); 
-    xTaskCreatePinnedToCore(taskControle, "Controle", 2048, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(taskControle, "Controle", 4096, NULL, 1, NULL, 1);
 
     //Task de comunicação MQTT
     //xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
@@ -341,14 +341,14 @@ void setup()
 
     //Task para tratar os erros
     //xTaskCreate(taskTrataErro, "erros", 2048, NULL, 3, NULL);
-    xTaskCreatePinnedToCore(taskTrataErro, "erros", 2048, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(taskTrataErro, "erros", 4096, NULL, 1, NULL, 1);
 
     //Task para o sensor de umidade e temperatura
     //xTaskCreate(taskUmidadeTemperatura, "umidade", 2048, NULL, 4, NULL);
-    xTaskCreatePinnedToCore(taskUmidadeTemperatura, "umidade", 2048, NULL, 2, NULL, 1);
+    xTaskCreatePinnedToCore(taskUmidadeTemperatura, "umidade", 4096, NULL, 1, NULL, 1);
 
     /* Task para gerenciamento da caixa dágua */
-    xTaskCreatePinnedToCore(taskCaixaDAgua, "caixa DAgua", 2048, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(taskCaixaDAgua, "caixa DAgua", 4096, NULL, 1, NULL, 1);
 }
 
 void loop() 
@@ -404,9 +404,17 @@ void taskMqtt(void *params)
 
    while(true)
     {
+        #ifdef DEBUG_TASK
+        Serial.println("task: taskMqtt");
+        #endif
+
         if(mqttStatus)
         {
             cliente_MQTT.loop();
+        }
+        else
+        {
+            Serial.println("Desconectado...");
         }
     }
 }
@@ -426,20 +434,18 @@ bool conecteMQTT()
 
         if(cliente_MQTT.connect(cliente_id.c_str(), mqtt_usuario, mqtt_senha))
     {
-        #ifdef DEBUG
             Serial.println("Êxito na conexão:");
             Serial.printf("Cliente %s conectado ao broker\n", cliente_id.c_str());
-        #endif
     }
     else
     {
-        #ifdef DEBUG
+        
             Serial.print("Falha ao conectar: ");
             Serial.print(cliente_MQTT.state());
             Serial.println();
             Serial.print("Tentativa: ");
             Serial.println(tentativa);
-        #endif
+       
         vTaskDelay( 2000 / portTICK_PERIOD_MS );
     }
 
@@ -457,9 +463,7 @@ bool conecteMQTT()
     }
     else
     {
-        #ifdef DEBUG
             Serial.println("Não conectado");
-        #endif
         return 0;
     }
     
@@ -751,11 +755,13 @@ void taskCaixaDAgua(void *params)
     int receive = 0;
     int result = 0;
     bool erro = true;
-    bool enviaComandoLiga = true;
-    bool enviaComandoDesliga = false;
 
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskCaixaDAgua");
+        #endif
+
         xSemaphoreTake(xCaixa_DAgua, portMAX_DELAY);
         if(flagIrrigacaoAtiva == false)
         {
@@ -775,35 +781,47 @@ void taskCaixaDAgua(void *params)
                 receive = 0;
 
                 #ifdef DEBUG
-                Serial.println("Comando para a caixa ligar foi enviado");
+                    Serial.println("Comando para a caixa ligar foi enviado");
                 #endif
             }
-         }
-            if((flagNivelAlto == true) && (prontoParaReceber == false) && (enviaComandoDesliga == true))
-            {
-                receive = DESLIGA_CAIXA;
-                result = xQueueSend(xQueue_Controle, &receive, 500 / portTICK_PERIOD_MS);
-                erro = dadoNaFila(result);
-                if(!erro)
-                {
-                    erroFila();
-                    erro = true;
-                }
+        }
 
-                enviaComandoLiga = true;
-                enviaComandoDesliga = false;
-                receive = 0;
+        #ifdef DEBUG
+        /*
+            Serial.print("flagNivelAlto");
+            Serial.println(flagNivelAlto);
+            Serial.print("prontoParaReceber: ");
+            Serial.println(prontoParaReceber);
+            Serial.print("enviaComandoDesliga: ");
+            Serial.println(enviaComandoDesliga);
+        */
+        #endif
 
-                #ifdef DEBUG
-                Serial.println("Comando para a caixa desligar foi enviado");
-                #endif
-            }
-            
-            if((flagNivelAlto == false) && (flagNivelBaixo == false))
+        if((flagNivelAlto == true) && (prontoParaReceber == false) && (enviaComandoDesliga == true))
+        {
+            receive = DESLIGA_CAIXA;
+            result = xQueueSend(xQueue_Controle, &receive, 500 / portTICK_PERIOD_MS);
+            erro = dadoNaFila(result);
+            if(!erro)
             {
-                statusRetorno.statusCaixa = CAIXA_NORMAL;
+                erroFila();
+                erro = true;
             }
-       
+
+            enviaComandoLiga = true;
+            enviaComandoDesliga = false;
+            receive = 0;
+
+            #ifdef DEBUG
+            Serial.println("Comando para a caixa desligar foi enviado");
+            #endif
+        }
+        
+        if((flagNivelAlto == false) && (flagNivelBaixo == false))
+        {
+            statusRetorno.statusCaixa = CAIXA_NORMAL;
+        }
+
          xSemaphoreGive(xCaixa_DAgua);
     }
 }
@@ -819,6 +837,9 @@ void taskControle(void *params)
 
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskControle");
+        #endif
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Controle, &receive, portMAX_DELAY);
 
@@ -937,10 +958,6 @@ void taskControle(void *params)
 /* Task para tratamento dos erros */
 void taskTrataErro(void *params)
 {
-    //TODO Mudar a lógica do sensor de vazão
-    //===========================================================================================
-    //Ideia: dois contadores de pulsos, um para geral e outro para cálculod e vazao
-    
     int desliga = 0;
     int result = 0;
     bool erro = true;
@@ -950,6 +967,10 @@ void taskTrataErro(void *params)
     
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskTrataErro");
+        #endif
+
         vTaskDelay( TEMPO_DE_ESPERA_VAZAO / portTICK_PERIOD_MS );          // Tempo de espera para checar se tem fluxo de água
 
          xSemaphoreTake(xEnviaComando, portMAX_DELAY);
@@ -983,6 +1004,8 @@ void taskTrataErro(void *params)
 
                     repeticao = 0;
                     checarPulsos = 0;
+                    enviaComandoLiga = true;
+                    enviaComandoDesliga = false;
                 }
             }
         }
@@ -999,6 +1022,10 @@ void taskSensorDeFluxo(void *params)
 
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskSensorDeFluxo");
+        #endif
+
         if(habilitaSensor.habilitaVazao == true)
         {
             sensorDeFluxo.process();
@@ -1034,6 +1061,10 @@ void taskcalculaVazao(void *params)
 
     while(true)
    {
+    #ifdef DEBUG_TASK
+        Serial.println("task: taskcalculaVazao");
+    #endif
+
     xSemaphoreTake(xInterrupcaoVazao, portMAX_DELAY);
     pulsoAnterior =  contaPulso;
     xSemaphoreGive(xInterrupcaoVazao);
@@ -1061,12 +1092,14 @@ void taskcalculaVazao(void *params)
         contadorDeTempo++;
 
         #ifdef DEBUG
+        /*
             Serial.print("PulsosPorSegundos: ");
             Serial.println(pulsoUmSegunddo);
             Serial.print("contadorDeTempo: ");
             Serial.println(contadorDeTempo);
             Serial.print("PulsosTotais: ");
             Serial.println(contaPulso);
+            */
         #endif
         tempVazao = vazao;
     }
@@ -1079,6 +1112,7 @@ void taskcalculaVazao(void *params)
         }
         
         #ifdef DEBUG
+        /*
             Serial.print("Vazão: ");
             Serial.print(tempVazao);
             Serial.println(" L/min");
@@ -1092,6 +1126,7 @@ void taskcalculaVazao(void *params)
             Serial.print("Volume Total: ");
             Serial.print(litrosDeAgua);
             Serial.println(" litros");
+            */
         #endif
         
         contadorDeTempo = 0;
@@ -1104,42 +1139,53 @@ void taskcalculaVazao(void *params)
 
 void taskUmidadeTemperatura(void *params)
 {
-
-    vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+    //vTaskDelay( 2000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+    DHT dht(UMIDADE, DHT22);
+    dht.begin();
 
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskUmidadeTemperatura");
+        #endif
         if(habilitaSensor.habilitaUmidade == true)
         {
             xSemaphoreTake(xEnviaComando, portMAX_DELAY);
             temperatura = dht.readTemperature();
-            umidade = dht.readHumidity();        
+            umidade = dht.readHumidity(); 
 
-            if((umidade > habilitaSensor.umidadeChuva) && (flagHabilitaIrrigacao == true))
+            if(isnan(umidade) || isnan(temperatura))       
             {
-                flagHabilitaIrrigacao = false;
+                #ifdef DEBUG
+                Serial.println(F("Falha na leitura!"));
+                #endif
+            }
+            else
+            {
+                if((umidade > habilitaSensor.umidadeChuva) && (flagHabilitaIrrigacao == true))
+                {
+                    flagHabilitaIrrigacao = false;
+                }
+
+                #ifdef DEBUG
+              
+                    Serial.println();
+                    Serial.print("Umidade: ");
+                    Serial.println(umidade);
+                    Serial.print("Temperatura: ");
+                    Serial.println(temperatura);
+                    Serial.println();
+
+                    if(umidade >= habilitaSensor.umidadeChuva)
+                    {
+                        Serial.println("Choveu!");
+                    }
+             
+                #endif
             }
             xSemaphoreGive(xEnviaComando);
 
-
-            
-            #ifdef DEBUG
-            /*
-                Serial.println();
-                Serial.print("Umidade: ");
-                Serial.println(umidade);
-                Serial.print("Temperatura: ");
-                Serial.println(temperatura);
-                Serial.println();
-
-                if(umidade >= habilitaSensor.umidadeChuva)
-                {
-                    Serial.println("Choveu!");
-                }
-            */
-            #endif
-
-            vTaskDelay( 10000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
+            vTaskDelay( 2000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
         }
         else
         {
@@ -1168,6 +1214,9 @@ void taskSensores(void *params)
 
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskSensores");
+        #endif
         nivelBaixo.process();
         nivelAlto.process();
         btnBomba.process();
@@ -1210,9 +1259,9 @@ void btnBombaLiberado()
 
 void nivelBaixoPressionado()
 {
-    int result = 0;
-    int comando = LIGA_CAIXA;
-    bool erro = true;
+    //int result = 0;
+    //int comando = LIGA_CAIXA;
+    //bool erro = true;
     xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
     flagNivelBaixo = true;
     statusRetorno.statusCaixa = CAIXA_VAZIA;
@@ -1231,9 +1280,9 @@ void nivelBaixoPressionado()
 
 void nivelAltoPressionado()
 {
-    int result = 0;
-    int comando = DESLIGA_CAIXA;
-    bool erro = true;
+    //int result = 0;
+    //int comando = DESLIGA_CAIXA;
+    //bool erro = true;
     xSemaphoreTake(xStatusRetorno, portMAX_DELAY);
     flagNivelAlto = true;
     statusRetorno.statusCaixa = CAIXA_CHEIA;
@@ -1282,6 +1331,9 @@ void taskReles(void *params)
 
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskReles");
+        #endif
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Reles, (void *)&receive, portMAX_DELAY);
 
@@ -1435,6 +1487,10 @@ void taskRelogio(void *params)
 
     while(true)
     {
+        #ifdef DEBUG_TASK
+            Serial.println("task: taskRelogio");
+        #endif
+
         if(!getLocalTime(&timeinfo))
         {
             #ifdef DEBUG
