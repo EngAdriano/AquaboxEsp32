@@ -69,6 +69,7 @@
 #define ERRO_DE_VAZAO           502         //Erro na vazão da bomba
 #define ERRO_SENSOR_DE_VAZAO    503         //Erro no sensor de vazão. Se conseguir detectar o sensor de nível baixo
 #define COMANDO_RECEBIDO        504         //Comando enviado via mqtt foi aceito e processado
+#define COFIGURACAO_RECEBIDA    505         //O ok para o comando de configuração da irrigação
 
 /* Outras configurações */
 #define TEMPO_BEEP_RAPIDO       200         //Tempo em milesegundos
@@ -608,6 +609,27 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         lerEEPROM();
         comando = 0;
         xSemaphoreGive(xConfig_irrigacao);
+
+        statusDoComando = COFIGURACAO_RECEBIDA;
+        //Cria o objeto dinâmico "json" com tamanho "6" para a biblioteca
+        //JsonDocument json;
+        //Atrela ao objeto "json" os dados definidos
+        json[ALIAS6] = statusDoComando;
+        //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+        size_t tamanho_payload = measureJson(json) + 1;
+
+        //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+        char payload[tamanho_payload];
+
+        //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+        serializeJson(json, payload, tamanho_payload);
+
+        //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+        publicarMensagem(topico_tx, payload);
+
+        statusDoComando = COMANDO_RECEBIDO;
+
+        json.clear();
     }
 
     if(comando == STATUS)
@@ -687,6 +709,24 @@ void callbackMqtt(char *topico, byte *payload, unsigned int length)
         comando = 0;
 
         xSemaphoreGive(xEnviaComando);
+
+        //Cria o objeto dinâmico "json" com tamanho "6" para a biblioteca
+        //JsonDocument json;
+        //Atrela ao objeto "json" os dados definidos
+        json[ALIAS6] = statusDoComando;
+        //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+        size_t tamanho_payload = measureJson(json) + 1;
+
+        //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+        char payload[tamanho_payload];
+
+        //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+        serializeJson(json, payload, tamanho_payload);
+
+        //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+        publicarMensagem(topico_tx, payload);
+
+        json.clear();
     }
 
     if(comando == ATUALIZA_FIRMWARE)
