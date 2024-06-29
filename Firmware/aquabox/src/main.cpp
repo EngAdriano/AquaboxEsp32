@@ -326,7 +326,7 @@ void setup()
 
     //Task de controle
     //xTaskCreate(taskControle, "Controle", 2048, NULL, 4, NULL); 
-    xTaskCreatePinnedToCore(taskControle, "Controle", 4096, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(taskControle, "Controle", 5120, NULL, 1, NULL, 1);
 
     //Task de comunicação MQTT
     //xTaskCreate(taskMqtt, "mqtt", 4096, NULL, 5, NULL);
@@ -1208,7 +1208,7 @@ void taskUmidadeTemperatura(void *params)
                 }
 
                 #ifdef DEBUG
-              
+                    /*
                     Serial.println();
                     Serial.print("Umidade: ");
                     Serial.println(umidade);
@@ -1220,7 +1220,7 @@ void taskUmidadeTemperatura(void *params)
                     {
                         Serial.println("Choveu!");
                     }
-             
+                    */
                 #endif
             }
             xSemaphoreGive(xEnviaComando);
