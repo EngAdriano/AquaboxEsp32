@@ -10,6 +10,7 @@
 #include "ModuloRele.hpp"
 #include "EEPROM.h"
 #include "DHT.h"
+#include "soc/rtc_wdt.h"
 
 
 /* Libera prints para debug */
@@ -178,6 +179,7 @@ struct statusAquabox statusRetorno;
 struct statusSensores habilitaSensor; 
 
 /* Protótipo das funções e tasks */
+void taskWdt(void *params);
 void taskMqtt(void *params);
 void taskControle(void *params);
 void taskSensores(void *params);
@@ -350,11 +352,14 @@ void setup()
 
     /* Task para gerenciamento da caixa dágua */
     xTaskCreatePinnedToCore(taskCaixaDAgua, "caixa DAgua", 4096, NULL, 1, NULL, 1);
+
+    /* Ressetar Watchdog */
+    xTaskCreatePinnedToCore(taskWdt, "watchdog", 1024, NULL, 1, NULL,1);
+
 }
 
 void loop() 
 {
-    log_i("Loop: versão do aplicativo %s", FW_VER);
   if (WiFi.status() == WL_CONNECTED)
   {
     // A cada 30 segundos
@@ -376,12 +381,28 @@ void loop()
       }
     }
   }
+  
   vTaskDelay( 5000 / portTICK_PERIOD_MS );
 }
 
 /* --------------------------------------------------*/
 /* --------------- Tarefas / Funções ----------------*/
 /* --------------------------------------------------*/
+
+// Task para ressetar o watchdog
+void taskWdt(void *params)
+{
+    rtc_wdt_set_length_of_reset_signal(RTC_WDT_SYS_RESET_SIG, RTC_WDT_LENGTH_3_2us);
+    rtc_wdt_set_stage(RTC_WDT_STAGE0, RTC_WDT_STAGE_ACTION_RESET_SYSTEM);
+    rtc_wdt_set_time(RTC_WDT_STAGE0, 250);
+
+    while (true)
+    {
+        rtc_wdt_feed();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+}
 
 // put function definitions here:
 void onUpdateProgress(int progress, int totalt)
@@ -880,6 +901,7 @@ void taskControle(void *params)
         #ifdef DEBUG_TASK
             Serial.println("task: taskControle");
         #endif
+
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Controle, &receive, portMAX_DELAY);
 
@@ -1056,6 +1078,7 @@ void taskTrataErro(void *params)
 
 void taskSensorDeFluxo(void *params)
 {
+
     EventoSensores sensorDeFluxo(SENSOR_DE_FLUXO, LOW);
 
     sensorDeFluxo.setPressionadoCallback(&leituraDePulsos);
@@ -1179,15 +1202,17 @@ void taskcalculaVazao(void *params)
 
 void taskUmidadeTemperatura(void *params)
 {
+
     //vTaskDelay( 2000 / portTICK_PERIOD_MS ); // Aguarde 1 segundo
     DHT dht(UMIDADE, DHT22);
     dht.begin();
-
+    
     while(true)
     {
         #ifdef DEBUG_TASK
             Serial.println("task: taskUmidadeTemperatura");
         #endif
+
         if(habilitaSensor.habilitaUmidade == true)
         {
             xSemaphoreTake(xEnviaComando, portMAX_DELAY);
@@ -1240,6 +1265,7 @@ void taskUmidadeTemperatura(void *params)
 
 void taskSensores(void *params)
 {
+
     /* Estânciar objetos*/
     EventoSensores nivelBaixo(SENSOR_NIVEL_BAIXO, LOW);
     EventoSensores nivelAlto(SENSOR_NIVEL_ALTO, LOW);
@@ -1257,6 +1283,7 @@ void taskSensores(void *params)
         #ifdef DEBUG_TASK
             Serial.println("task: taskSensores");
         #endif
+
         nivelBaixo.process();
         nivelAlto.process();
         btnBomba.process();
@@ -1374,6 +1401,7 @@ void taskReles(void *params)
         #ifdef DEBUG_TASK
             Serial.println("task: taskReles");
         #endif
+
         /* Espera até algo ser recebido na queue */
         xQueueReceive(xQueue_Reles, (void *)&receive, portMAX_DELAY);
 
