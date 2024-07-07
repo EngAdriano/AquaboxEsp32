@@ -51,6 +51,7 @@
 #define ATUALIZA_FIRMWARE   305         //Comando para atualizar o firmware
 #define VERSAO_FIRMWARE     306         //Mostra a versão do firmaware atual
 #define MQTT_RECEBIDO       307         //Função callback ativada, mensagem de Mqtt recebida
+#define LEITURA_EEPROM      308         //Leitura da configuração da eeprom para irrigação
 
 /* Códigos de Retornos */
 #define BOMBA_LIGADA            112         //Avisar que a bom esta ligada
@@ -162,7 +163,7 @@ const char* topico_rx = "Aquabox/rx";                                           
         int habilitaVazao = 1;
         int habilitaUmidade = 1;
         bool erroDeVazao = false;
-        float umidadeChuva = 85.00;
+        float umidadeChuva = 90.00;
     };
 
     const char ALIAS1[] = "statusBomba";
@@ -174,6 +175,17 @@ const char* topico_rx = "Aquabox/rx";                                           
     const char ALIAS7[] = "Umidade";
     const char ALIAS8[] = "Temperatura";
     const char ALIAS9[] = "Versao";
+    const char ALIAS10[] = "horaDeInicio";
+    const char ALIAS11[] = "minutoDeInicio";
+    const char ALIAS12[] = "duracao";
+    const char ALIAS13[] = "dom";
+    const char ALIAS14[] = "seg";
+    const char ALIAS15[] = "ter";
+    const char ALIAS16[] = "qua";
+    const char ALIAS17[] = "qui";
+    const char ALIAS18[] = "sex";
+    const char ALIAS19[] = "sab";
+
 
     
 struct irrigacaoConf conf_Irriga;
@@ -839,6 +851,28 @@ void taskMqttRecebe(void *params)
                 break;
             }
 
+            case LEITURA_EEPROM:
+            {
+                /* Modelo do Json de atualiza firmware */
+                /*
+                    {
+                        "comando": "308"
+                    }
+                */
+                result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
+                erro = dadoNaFila(result);
+                if(!erro)
+                {
+                    erroFila();
+                    erro = true;
+                }
+                
+                xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+                comando = 0;
+                xSemaphoreGive(xEnviaComando);
+                break;
+            }
+
             case RE_START:
             {
                 /* Modelo do Json de configuração recebido */
@@ -1054,9 +1088,9 @@ void taskControle(void *params)
                 //JsonDocument json;
 
                 xSemaphoreTake(xEnviaComando, portMAX_DELAY);
-                //Atrela ao objeto "json" os dados definidos
-                json[ALIAS7] = umidade;
-                json[ALIAS8] = temperatura;
+                    //Atrela ao objeto "json" os dados definidos
+                    json[ALIAS7] = umidade;
+                    json[ALIAS8] = temperatura;
                 xSemaphoreGive(xEnviaComando);
 
                 //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
@@ -1078,6 +1112,44 @@ void taskControle(void *params)
                     Serial.println(payload);
                 #endif
                 receive = 0;
+                break;
+            }
+        
+        case LEITURA_EEPROM:
+            {
+                xSemaphoreTake(xEnviaComando, portMAX_DELAY);
+                    json[ALIAS10] = conf_Irriga.horaDeInicio;
+                    json[ALIAS11] = conf_Irriga.minutoDeInicio;
+                    json[ALIAS12] = conf_Irriga.duracao;
+                    json[ALIAS13] = conf_Irriga.diasDaSemana[0];
+                    json[ALIAS14] = conf_Irriga.diasDaSemana[1];
+                    json[ALIAS15] = conf_Irriga.diasDaSemana[2];
+                    json[ALIAS16] = conf_Irriga.diasDaSemana[3];
+                    json[ALIAS17] = conf_Irriga.diasDaSemana[4];
+                    json[ALIAS18] = conf_Irriga.diasDaSemana[5];
+                    json[ALIAS19] = conf_Irriga.diasDaSemana[6];
+                xSemaphoreGive(xEnviaComando);
+
+                //Mede o tamanho da mensagem "json" e atrela o valor somado em uma unidade ao objeto "tamanho_mensagem"
+                size_t tamanho_payload = measureJson(json) + 1;
+
+                //Cria a string "mensagem" de acordo com o tamanho do objeto "tamanho_mensagem"
+                char payload[tamanho_payload];
+
+                //Copia o objeto "json" para a variavel "payload" e com o "tamanho_payload"
+                serializeJson(json, payload, tamanho_payload);
+
+                //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
+                publicarMensagem(topico_tx, payload);
+
+                json.clear();
+
+                #ifdef DEBUG
+                    Serial.print("Json enviado para topico: topico/tx ");
+                    Serial.println(payload);
+                #endif
+                receive = 0;
+
                 break;
             }
         }       
