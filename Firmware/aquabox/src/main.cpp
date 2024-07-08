@@ -79,11 +79,13 @@
 #define INTERVALO_BEEPS         100         //Tempo em milesegundos
 #define TEMPO_DE_ESPERA_VAZAO   30000       //Tempo em milesegundos ( 10 segundos)
 #define TEMPO_INTERVALO         5           //Tempo de intervalo para iniciar o segundo setor
-#define HORA_RESETA_UMIDADE     22          //Hora para resetar a variável da umidade
+
+//Mudar para 23 na versão final 
+#define HORA_RESETA_UMIDADE     18         //Hora para resetar a variável da umidade
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
-#define FW_VER "v@1.0.4"                                // A versão do firmware
+#define FW_VER "v@1.1.0"                                // A versão do firmware
 #define HABILITA_ATUALIZACAO    1                       //Habilita a atualização do firmware
 #define DESABILITA_ATUALIZACAO  0                       //Desabilita atualização do firmware                         
 
@@ -106,7 +108,7 @@ habilitaSensorUmidade   (12)
 */
 
 /* Demais defines */
-#define TAMANHO_EEPROM 14
+#define TAMANHO_EEPROM 15
 //#define MSG_BUFFER_SIZE 50
 //char msg[MSG_BUFFER_SIZE];
 
@@ -163,7 +165,7 @@ const char* topico_rx = "Aquabox/rx";                                           
         int habilitaVazao = 1;
         int habilitaUmidade = 1;
         bool erroDeVazao = false;
-        float umidadeChuva = 90.00;
+        int umidadeChuva = 80;
     };
 
     const char ALIAS1[] = "statusBomba";
@@ -456,6 +458,7 @@ void taskMqtt(void *params)
         else
         {
             Serial.println("Desconectado...");
+            mqttStatus = conecteMQTT();
         }
     }
 }
@@ -764,7 +767,8 @@ void taskMqttRecebe(void *params)
                 {
                     "comando": "304",
                     "umidade": "valor", 
-                    "vazao": "valor"  
+                    "vazao": "valor",
+                    "uChuva": "valor"
                 }
                 */
 
@@ -772,6 +776,7 @@ void taskMqttRecebe(void *params)
 
                 habilitaSensor.habilitaUmidade = doc["umidade"];
                 habilitaSensor.habilitaVazao = doc["vazao"];
+                habilitaSensor.umidadeChuva = doc["uChuva"];
 
                 #ifdef DEBUG
                 Serial.println();
@@ -784,6 +789,7 @@ void taskMqttRecebe(void *params)
 
                 EEPROM.write(11,habilitaSensor.habilitaUmidade);
                 EEPROM.write(12,habilitaSensor.habilitaVazao);
+                EEPROM.write(13,habilitaSensor.umidadeChuva);
 
                 EEPROM.commit();
 
@@ -1876,6 +1882,7 @@ void escreverEEPROM()
     EEPROM.write(10,conf_Irriga.diasDaSemana[6]);
     EEPROM.write(11,habilitaSensor.habilitaUmidade);
     EEPROM.write(12,habilitaSensor.habilitaVazao);
+    EEPROM.write(13,(int)habilitaSensor.umidadeChuva);
 
     EEPROM.commit();
 
@@ -1900,6 +1907,7 @@ void lerEEPROM()
     conf_Irriga.diasDaSemana[6] = EEPROM.read(10);
     habilitaSensor.habilitaUmidade = EEPROM.read(11);
     habilitaSensor.habilitaVazao = EEPROM.read(12);
+    habilitaSensor.umidadeChuva = EEPROM.read(13);
 
     #ifdef DEBUG
         Serial.println("EEPROM lida");
@@ -1917,6 +1925,7 @@ void lerEEPROM()
         Serial.println(conf_Irriga.tempoDeDuracao);
         Serial.println(habilitaSensor.habilitaUmidade);
         Serial.println(habilitaSensor.habilitaVazao);
+        Serial.println(habilitaSensor.umidadeChuva);
     #endif
 }
 
