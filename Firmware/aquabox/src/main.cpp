@@ -85,11 +85,11 @@
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
-#define FW_VER "v@2.0.0"                                // A versão do firmware
+#define FW_VER "v@1.1.0"                                // A versão do firmware
 #define HABILITA_ATUALIZACAO    1                       //Habilita a atualização do firmware
 #define DESABILITA_ATUALIZACAO  0                       //Desabilita atualização do firmware                         
 
-/* Estrutura da EEPROM 
+/* Estrutura da EEPROM para armazenamento das configurações
     Campo               Endereço
 ==================================    
 modificado              (0)
@@ -105,11 +105,12 @@ diasDaSemana[5]         (9)     - sex
 diasDaSemana[6]         (10)    - sab
 habilitaSensorVazao     (11)
 habilitaSensorUmidade   (12)
+umidadeChuva            (13)
 */
 
 /* Demais defines */
-#define TAMANHO_EEPROM 15
-#define RETER_MENSAGEM true
+#define TAMANHO_EEPROM 15               //Tamanho da memória EEPROM utilizada para configiração
+#define RETER_MENSAGEM false            //Liga ou desliga a retenção de mensagens no servidor mqtt, padrão: desativado
 //#define MSG_BUFFER_SIZE 50
 //char msg[MSG_BUFFER_SIZE];
 
@@ -141,56 +142,53 @@ const char* topico_rx = "Aquabox/rx";                                           
 /* Variáveis globais *
 
 /* Estruturas */
-    struct irrigacaoConf
-    {
-        int modificado = 1;    //flag para indicar se estrutura foi alterada
-        int horaDeInicio = 17;
-        int minutoDeInicio = 0;
-        int duracao = 20;  //20 minutos
-        int diasDaSemana[7] = {1, 1, 1, 1, 1, 1, 1};
-        int tempoDeDuracao = duracao*60;  //20 minutos      //Tempo utilizado no programa
-        
-    };
+struct irrigacaoConf
+{
+    int modificado = 1;                             //flag para indicar se estrutura foi alterada
+    int horaDeInicio = 17;                          //Hora de início da irrigação
+    int minutoDeInicio = 0;                         //minutos de início da irrigação
+    int duracao = 20;                               //20 minutos
+    int diasDaSemana[7] = {1, 1, 1, 1, 1, 1, 1};    //Habilitar dia da semana dom ... sab
+    int tempoDeDuracao = duracao*60;                //20 minutos - Tempo utilizado no programa
+};
 
-    struct statusAquabox
-    {
-        int statusBomba = BOMBA_DESLIGADA;
-        int statusCaixa = CAIXA_NORMAL;
-        int statusSetor1 = SETOR1_DESLIGADO;
-        int statusSetor2 = SETOR2_DESLIGADO;
-        int statusErro = SEM_ERROS;
-    };
+struct statusAquabox
+{
+    int statusBomba = BOMBA_DESLIGADA;
+    int statusCaixa = CAIXA_NORMAL;
+    int statusSetor1 = SETOR1_DESLIGADO;
+    int statusSetor2 = SETOR2_DESLIGADO;
+    int statusErro = SEM_ERROS;
+};
 
-    struct statusSensores
-    {
-        int habilitaVazao = 1;
-        int habilitaUmidade = 1;
-        bool erroDeVazao = false;
-        int umidadeChuva = 90;
-    };
+struct statusSensores
+{
+    int habilitaVazao = 1;
+    int habilitaUmidade = 1;
+    bool erroDeVazao = false;
+    int umidadeChuva = 90;
+};
 
-    const char ALIAS1[] = "statusBomba";
-    const char ALIAS2[] = "statusCaixa";
-    const char ALIAS3[] = "statusSetor1";
-    const char ALIAS4[] = "statusSetor2";
-    const char ALIAS5[] = "statusErro";
-    const char ALIAS6[] = "statusDoComando";
-    const char ALIAS7[] = "Umidade";
-    const char ALIAS8[] = "Temperatura";
-    const char ALIAS9[] = "Versao";
-    const char ALIAS10[] = "horaDeInicio";
-    const char ALIAS11[] = "minutoDeInicio";
-    const char ALIAS12[] = "duracao";
-    const char ALIAS13[] = "dom";
-    const char ALIAS14[] = "seg";
-    const char ALIAS15[] = "ter";
-    const char ALIAS16[] = "qua";
-    const char ALIAS17[] = "qui";
-    const char ALIAS18[] = "sex";
-    const char ALIAS19[] = "sab";
+const char ALIAS1[] = "statusBomba";
+const char ALIAS2[] = "statusCaixa";
+const char ALIAS3[] = "statusSetor1";
+const char ALIAS4[] = "statusSetor2";
+const char ALIAS5[] = "statusErro";
+const char ALIAS6[] = "statusDoComando";
+const char ALIAS7[] = "Umidade";
+const char ALIAS8[] = "Temperatura";
+const char ALIAS9[] = "Versao";
+const char ALIAS10[] = "horaDeInicio";
+const char ALIAS11[] = "minutoDeInicio";
+const char ALIAS12[] = "duracao";
+const char ALIAS13[] = "dom";
+const char ALIAS14[] = "seg";
+const char ALIAS15[] = "ter";
+const char ALIAS16[] = "qua";
+const char ALIAS17[] = "qui";
+const char ALIAS18[] = "sex";
+const char ALIAS19[] = "sab";
 
-
-    
 struct irrigacaoConf conf_Irriga;
 struct statusAquabox statusRetorno;
 struct statusSensores habilitaSensor; 
@@ -237,7 +235,7 @@ WiFiClientSecure espCliente;                //Estância o objeto cliente
 PubSubClient cliente_MQTT(espCliente);      //Instancia o Cliente MQTT passando o objeto espClient
 //DHT dht(UMIDADE, DHT22);
 
-//Cria o objeto dinamico "json" com tamanho "6" para a biblioteca
+//Cria o objeto dinamico "json" 
 JsonDocument json;
 
 static const char *root_ca PROGMEM = R"EOF(
