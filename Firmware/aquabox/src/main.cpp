@@ -85,7 +85,7 @@
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
-#define FW_VER "v@1.1.0"                                // A versão do firmware
+#define FW_VER "v@2.0.0"                                // A versão do firmware
 #define HABILITA_ATUALIZACAO    1                       //Habilita a atualização do firmware
 #define DESABILITA_ATUALIZACAO  0                       //Desabilita atualização do firmware                         
 
@@ -166,7 +166,7 @@ const char* topico_rx = "Aquabox/rx";                                           
         int habilitaVazao = 1;
         int habilitaUmidade = 1;
         bool erroDeVazao = false;
-        int umidadeChuva = 80;
+        int umidadeChuva = 90;
     };
 
     const char ALIAS1[] = "statusBomba";
