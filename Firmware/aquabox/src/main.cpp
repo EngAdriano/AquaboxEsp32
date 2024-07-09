@@ -14,7 +14,7 @@
 
 
 /* Libera prints para debug */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TASK
 
 /* Pinos GPIOs */
@@ -81,7 +81,7 @@
 #define TEMPO_INTERVALO         5           //Tempo de intervalo para iniciar o segundo setor
 
 //Mudar para 23 na versão final 
-#define HORA_RESETA_UMIDADE     18         //Hora para resetar a variável da umidade
+#define HORA_RESETA_UMIDADE     23         //Hora para resetar a variável da umidade
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
@@ -109,6 +109,7 @@ habilitaSensorUmidade   (12)
 
 /* Demais defines */
 #define TAMANHO_EEPROM 15
+#define RETER_MENSAGEM true
 //#define MSG_BUFFER_SIZE 50
 //char msg[MSG_BUFFER_SIZE];
 
@@ -219,7 +220,7 @@ void lerEEPROM();
 void erroFila();
 bool conecteMQTT();
 void callbackMqtt(char *topico, byte *payload, unsigned int length);
-void publicarMensagem(const char* topico, String payload);
+void publicarMensagem(const char* topico, String payload, boolean retido);
 void beepSinal(int duracao);     //Duracao em milesegundos
 void sequenciaBeeps(int beeps, int duracao, int intervalo);  //Tempos em milisegundos
 void leituraDePulsos();
@@ -628,7 +629,7 @@ void taskMqttRecebe(void *params)
                 serializeJson(json, payload, tamanho_payload);
 
                 //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
+                publicarMensagem(topico_tx, payload, RETER_MENSAGEM);
 
                 json.clear();
             }
@@ -708,7 +709,7 @@ void taskMqttRecebe(void *params)
                 serializeJson(json, payload, tamanho_payload);
 
                 //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
+                publicarMensagem(topico_tx, payload, RETER_MENSAGEM);
 
                 statusDoComando = COMANDO_RECEBIDO;
 
@@ -813,7 +814,7 @@ void taskMqttRecebe(void *params)
                 serializeJson(json, payload, tamanho_payload);
 
                 //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
+                publicarMensagem(topico_tx, payload, RETER_MENSAGEM);
 
                 json.clear();
                 break;
@@ -902,9 +903,9 @@ void taskMqttRecebe(void *params)
     }
 }
 
-void publicarMensagem(const char* topico, String payload)
+void publicarMensagem(const char* topico, String payload, boolean retido)
 {
-    if (cliente_MQTT.publish(topico, payload.c_str()))
+    if (cliente_MQTT.publish(topico, payload.c_str(), true))
     {
         #ifdef DEBUG
         Serial.println("Mensagem Publicada ["+String(topico)+"]: "+ payload);
@@ -1050,7 +1051,7 @@ void taskControle(void *params)
                 serializeJson(json, payload, tamanho_payload);
 
                 //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
+                publicarMensagem(topico_tx, payload, RETER_MENSAGEM);
 
                 #ifdef DEBUG
                     Serial.print("Json enviado para topico: topico/tx ");
@@ -1076,7 +1077,7 @@ void taskControle(void *params)
                 serializeJson(json, payload, tamanho_payload);
 
                 //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
+                publicarMensagem(topico_tx, payload, RETER_MENSAGEM);
 
                 #ifdef DEBUG
                     Serial.print("Json enviado para topico: topico/tx ");
@@ -1109,7 +1110,7 @@ void taskControle(void *params)
                 serializeJson(json, payload, tamanho_payload);
 
                 //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
+                publicarMensagem(topico_tx, payload, RETER_MENSAGEM);
 
                 json.clear();
 
@@ -1146,7 +1147,7 @@ void taskControle(void *params)
                 serializeJson(json, payload, tamanho_payload);
 
                 //Publicar a variável "payload no servidor utilizando o tópico: topico/tx"
-                publicarMensagem(topico_tx, payload);
+                publicarMensagem(topico_tx, payload, RETER_MENSAGEM);
 
                 json.clear();
 
