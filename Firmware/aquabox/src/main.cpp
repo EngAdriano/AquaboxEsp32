@@ -14,7 +14,7 @@
 
 
 /* Libera prints para debug */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TASK
 
 /* Pinos GPIOs */
