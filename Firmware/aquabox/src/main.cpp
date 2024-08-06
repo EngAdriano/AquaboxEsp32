@@ -1,3 +1,9 @@
+/*
+/ Firmware do sistema Aquabox Cumbuco versão 2
+/ Autor: Eng. José Adriano
+/ Data: 06/08/2024
+*/
+
 #include "Arduino.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -85,7 +91,7 @@
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
-#define FW_VER "v@1.1.0"                                // A versão do firmware
+#define FW_VER "v@2.0.0"                                // A versão do firmware
 #define HABILITA_ATUALIZACAO    1                       //Habilita a atualização do firmware
 #define DESABILITA_ATUALIZACAO  0                       //Desabilita atualização do firmware                         
 
@@ -295,11 +301,13 @@ void setup()
     /*Executa a conexão com WiFi via WiFiManager*/
     WiFi.mode(WIFI_STA);
     WiFiManager wm;
+    wm.setConfigPortalTimeout(60);              //Temporiza por 60 segundos antes de indicar que não há conexão WiFi
     bool res;
     res = wm.autoConnect("Aquabox");
     if(!res)
     {
             Serial.println("Falha ao conectar");
+            ESP.restart();                      //Reinicializa o ESP32
     }
     else
     {
@@ -836,7 +844,7 @@ void taskMqttRecebe(void *params)
 
             case VERSAO_FIRMWARE:
             {
-                /* Modelo do Json de atualiza firmware */
+                /* Modelo do Json de ler versão de  firmware */
                 /*
                     {
                         "comando": "306"
@@ -1289,8 +1297,8 @@ void taskcalculaVazao(void *params)
     //Trocar para 3.33mL
     vazao = pulsoUmSegunddo * 3.33 ;         //Conta os pulsos no último segundo e multiplica por 2,25mL, que é a vazão de cada pulso
     xSemaphoreGive(xInterrupcaoVazao);
-    vazao = vazao * 60;                 //Converte segundos em minutos, tornando a unidade de medida mL/min
-    vazao = vazao / 1000;               //Converte mL em litros, tornando a unidade de medida L/min
+    vazao = vazao * 60;                     //Converte segundos em minutos, tornando a unidade de medida mL/min
+    vazao = vazao / 1000;                   //Converte mL em litros, tornando a unidade de medida L/min
     
     //temPulso = temPulso + contaPulso;
     
