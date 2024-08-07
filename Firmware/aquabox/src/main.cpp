@@ -1686,6 +1686,7 @@ void taskRelogio(void *params)
     int result = 0;
     int comando = 0;
     bool erro = true;
+    bool resetar = false;
     int setorComando = 0;
     int tempoDecorrido = 0;
     bool iniciarContagem = false;
@@ -1701,7 +1702,7 @@ void taskRelogio(void *params)
     const int   daylightOffset_sec = 3600;
     int diaDaSemana = 0;
 
-    // Init and get the time
+    // Inicializa e obtém o tempo
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     struct tm timeinfo;
 
@@ -1871,6 +1872,17 @@ void taskRelogio(void *params)
         }
 
         vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        //Reinicialização diária para evitar os travamentos 
+        if((timeinfo.tm_hour == 18) && (resetar == true))
+        {
+            ESP.restart();
+            resetar = false;
+        }
+        else
+        {
+            resetar = true;
+        }
     }
 }
 
