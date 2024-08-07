@@ -173,6 +173,7 @@ struct statusSensores
     int habilitaUmidade = 1;
     bool erroDeVazao = false;
     int umidadeChuva = 90;
+    //int reseta = 0;
 };
 
 const char ALIAS1[] = "statusBomba";
@@ -1723,7 +1724,7 @@ void taskRelogio(void *params)
             diaDaSemana = timeinfo.tm_wday;
 
             //Reinicialização diária para evitar os travamentos 
-            if((timeinfo.tm_hour == 23) && (timeinfo.tm_min == 50))
+            if((timeinfo.tm_hour == 20) && (timeinfo.tm_min == 30) && (timeinfo.tm_sec == 59))
             {
                 ESP.restart();
             }
@@ -1897,6 +1898,7 @@ void escreverEEPROM()
     EEPROM.write(11,habilitaSensor.habilitaUmidade);
     EEPROM.write(12,habilitaSensor.habilitaVazao);
     EEPROM.write(13,(int)habilitaSensor.umidadeChuva);
+    //EEPROM.write(14,habilitaSensor.reseta);
 
     EEPROM.commit();
 
@@ -1922,6 +1924,7 @@ void lerEEPROM()
     habilitaSensor.habilitaUmidade = EEPROM.read(11);
     habilitaSensor.habilitaVazao = EEPROM.read(12);
     habilitaSensor.umidadeChuva = EEPROM.read(13);
+    //habilitaSensor.reseta = EEPROM.read(14);
 
     #ifdef DEBUG
         Serial.println("EEPROM lida");
@@ -1940,6 +1943,7 @@ void lerEEPROM()
         Serial.println(habilitaSensor.habilitaUmidade);
         Serial.println(habilitaSensor.habilitaVazao);
         Serial.println(habilitaSensor.umidadeChuva);
+        //Serial.println(habilitaSensor.reseta);
     #endif
 }
 
