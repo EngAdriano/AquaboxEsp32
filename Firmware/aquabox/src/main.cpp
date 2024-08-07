@@ -1686,7 +1686,7 @@ void taskRelogio(void *params)
     int result = 0;
     int comando = 0;
     bool erro = true;
-    bool resetar = false;
+    bool resetar = true;
     int setorComando = 0;
     int tempoDecorrido = 0;
     bool iniciarContagem = false;
