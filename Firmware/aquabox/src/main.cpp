@@ -1724,7 +1724,7 @@ void taskRelogio(void *params)
             diaDaSemana = timeinfo.tm_wday;
 
             //Reinicialização diária para evitar os travamentos 
-            if((timeinfo.tm_hour == 13) && (timeinfo.tm_min == 30) && (timeinfo.tm_sec >= 55) && (timeinfo.tm_sec <= 59))
+            if((timeinfo.tm_hour == 13) && (timeinfo.tm_min == 40) && (timeinfo.tm_sec >= 55) && (timeinfo.tm_sec <= 59))
             {
                 vTaskDelay(5000 / portTICK_PERIOD_MS);     //5 segundos
                 ESP.restart();
