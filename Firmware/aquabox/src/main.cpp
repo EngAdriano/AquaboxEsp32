@@ -1795,7 +1795,6 @@ void taskRelogio(void *params)
         {
         case SETOR1_LIGA:
             comando = LIGA_SETOR1;
-
             result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
             erro = dadoNaFila(result);
             if(!erro)
@@ -1814,7 +1813,6 @@ void taskRelogio(void *params)
 
         case SETOR1_DESLIGA:
             comando = DESLIGA_SETOR1;
-
             result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
             erro = dadoNaFila(result);
             if(!erro)
@@ -1833,7 +1831,6 @@ void taskRelogio(void *params)
 
         case SETOR2_LIGA:
             comando = LIGA_SETOR2;
-
             result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
             erro = dadoNaFila(result);
             if(!erro)
@@ -1852,7 +1849,6 @@ void taskRelogio(void *params)
 
         case SETOR2_DESLIGA:
             comando = DESLIGA_SETOR2;
-
             result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
             erro = dadoNaFila(result);
             if(!erro)
