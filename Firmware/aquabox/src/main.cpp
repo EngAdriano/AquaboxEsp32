@@ -307,12 +307,12 @@ void setup()
     res = wm.autoConnect("Aquabox");
     if(!res)
     {
-            Serial.println("Falha ao conectar");
-            ESP.restart();                      //Reinicializa o ESP32
+        Serial.println("Falha ao conectar");
+        ESP.restart();                      //Reinicializa o ESP32
     }
     else
     {
-            Serial.println("Conectado...");
+        Serial.println("Conectado...");
     }
 
     /* Versão */
