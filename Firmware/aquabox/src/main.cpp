@@ -153,7 +153,7 @@ struct irrigacaoConf
     int modificado = 1;                             //flag para indicar se estrutura foi alterada
     int horaDeInicio = 17;                          //Hora de início da irrigação
     int minutoDeInicio = 0;                         //minutos de início da irrigação
-    int duracao = 20;                               //20 minutos
+    int duracao = 30;                               //30 minutos
     int diasDaSemana[7] = {1, 1, 1, 1, 1, 1, 1};    //Habilitar dia da semana dom ... sab
     int tempoDeDuracao = duracao*60;                //20 minutos - Tempo utilizado no programa
 };
