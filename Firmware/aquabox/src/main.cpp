@@ -91,7 +91,7 @@
 
 /* Configurações de OtaDrive */
 #define APIKEY "83c32ca9-bf9b-46d3-824c-081871d6a5ae"   // Chave de API OTAdrive para este produto (gerar a minha)
-#define FW_VER "v@2.0.0"                                // A versão do firmware
+#define FW_VER "v@2.0.1"                                // A versão do firmware
 #define HABILITA_ATUALIZACAO    1                       //Habilita a atualização do firmware
 #define DESABILITA_ATUALIZACAO  0                       //Desabilita atualização do firmware                         
 
@@ -140,8 +140,8 @@ volatile int contaPulso = 0;        //Variável para a quantidade de pulsos
 // Dados para acesso ao MQTT
 const char* mqtt_server = "503847782e204ff99743e99127691fe7.s1.eu.hivemq.cloud";    //Host do broker
 const int porta_TLS = 8883;                                                         //Porta
-const char* mqtt_usuario = "Aquabox";                                               //Usuário
-const char* mqtt_senha = "Liukin@0804";                                             //Senha do usuário
+const char* mqtt_usuario = "Aquabox1";                                               //Usuário
+const char* mqtt_senha = "Liukin@1208";                                             //Senha do usuário
 const char* topico_tx = "Aquabox/tx";                                               //Tópico para transmitir dados
 const char* topico_rx = "Aquabox/rx";                                               //Tópico para receber dados
 
@@ -1453,6 +1453,8 @@ void btnBombaPressionado()
         Serial.println("Botão da Bomba pressionado");
     #endif
 
+    habilitaSensor.habilitaVazao = 0;
+
     result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
     erro = dadoNaFila(result);
     if(!erro)
@@ -1467,6 +1469,8 @@ void btnBombaLiberado()
     int result = 0;
     int comando = DESLIGA_BOMBA;
     bool erro = true;
+
+    habilitaSensor.habilitaVazao = 1;
 
     result = xQueueSend(xQueue_Controle, &comando, 500 / portTICK_PERIOD_MS);
     erro = dadoNaFila(result);
