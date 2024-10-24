@@ -459,6 +459,9 @@ void taskMqtt(void *params)
         Serial.println("task: taskMqtt");
         #endif
 
+        mqttStatus = cliente_MQTT.connected();
+        //mqttStatus = cliente_MQTT.state();
+
         if(mqttStatus)
         {
             cliente_MQTT.loop();
