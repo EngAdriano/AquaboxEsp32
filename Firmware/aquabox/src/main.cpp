@@ -1,7 +1,7 @@
 /*
 / Firmware do sistema Aquabox Cumbuco versão 2
 / Autor: Eng. José Adriano
-/ Data: 06/08/2024
+/ Data: 25/10/2024
 */
 
 #include "Arduino.h"
